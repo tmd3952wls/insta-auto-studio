@@ -29,7 +29,7 @@ def code_objects(code):
             yield from code_objects(value)
 
 assert not any('open_login' in nested.co_names for nested in code_objects(pyz.extract('studio.app')))
-assert 'drama-3-preview' in set(strings(pyz.extract('studio.models')))
+assert 'drama-3' in set(strings(pyz.extract('studio.models')))
 assert '4a81bbbb5cd44f22922bf934cb93b369' in set(strings(pyz.extract('studio.models')))
 print('Packaged Drama3 MCP / 일반여성2 verified; no voice browser automation')
 fish_constants = set(strings(pyz.extract('studio.fish')))

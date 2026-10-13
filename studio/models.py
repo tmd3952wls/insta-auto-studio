@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 VIDEO_MODEL = 'seedance-2.0-mini'  # Cheapest 720p model that takes several reference photos per clip.
 VOICE_ID = '4a81bbbb5cd44f22922bf934cb93b369'
-DRAMA_MODEL = 'drama-3-preview'
+DRAMA_MODEL = 'drama-3'  # Fish rejects the old name 'drama-3-preview' since 2026-10-14.
 MOTION_PARAMETERS = {'aspect_ratio': '9:16', 'resolution': '720p', 'duration': '4s'}
 MIN_MOTION_SIDE = 720  # Shorter side of an accepted Fish motion clip; smaller results are rejected.
 MIN_PHOTOS = 10
