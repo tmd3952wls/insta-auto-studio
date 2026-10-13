@@ -214,7 +214,8 @@ class VideoRenderTests(unittest.TestCase):
             job.narration = {'0': {'file': 'voice.wav'}}
             with patch('studio.render.job_path', return_value=folder):
                 result = render(job)
-            self.assertAlmostEqual(result['duration'], 2.0, delta=0.05)  # 2 s of voice; fast-cut reels add no pause.
+            # 0.1 s thumbnail still, then 2 s of voice; fast-cut reels add no pause.
+            self.assertAlmostEqual(result['duration'], 2.1, delta=0.05)
             def pixel(at):
                 run('-ss', str(at), '-i', folder / result['video'], '-frames:v', '1', folder / 'f.png')
                 with Image.open(folder / 'f.png') as image:
@@ -222,6 +223,30 @@ class VideoRenderTests(unittest.TestCase):
             self.assertLess(pixel(0.3), 200)   # Source 0 is zoomed: no white strip.
             self.assertGreater(pixel(1.8), 240)  # Source 1 keeps its strip at zoom 1.0.
             self.assertEqual([t['photo'] for t in result_timeline(folder)], [0, 1])
+
+    def test_reel_opens_on_a_titled_thumbnail_still(self):
+        from studio.render import render
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            job = video_job(folder, durations=(3.0,))
+            with wave.open(str(folder / 'voice.wav'), 'wb') as audio:
+                audio.setparams((1, 2, 48000, 0, 'NONE', 'not compressed'))
+                audio.writeframes(tone(96000))
+            job.storyboard = Storyboard.validate_video_plan(
+                {'scenes': [{'photos': [0], 'text': '가.'}], 'segments': [{'source': 0, 'start': 0.0, 'end': 2.0}]}, job.photos)
+            job.narration = {'0': {'file': 'voice.wav'}}
+            job.options.thumbnail.text = '녹이 싹'
+            job.options.thumbnail.style.color = '#FF0000'
+            def reds(name):  # Pure-red pixels of the first frame, where the title sits.
+                run('-i', folder / name, '-frames:v', '1', folder / 'first.png')
+                with Image.open(folder / 'first.png') as image:
+                    return sum(r > 180 and g < 90 and b < 90 for r, g, b in image.convert('RGB').crop((200, 450, 880, 780)).getdata())
+            with patch('studio.render.job_path', return_value=folder):
+                result = render(job)
+                self.assertGreater(reds(result['file']), 2000)  # The final reel's first frame carries the title.
+                self.assertEqual(reds(result['video']), 0)  # The clean video opens on the same still without it.
+                job.options.thumbnail.enabled = False
+                self.assertAlmostEqual(render(job)['duration'], result['duration'] - 0.1, delta=0.01)
 
 
 def result_timeline(folder):

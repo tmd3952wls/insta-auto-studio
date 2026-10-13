@@ -46,6 +46,17 @@
 <div id="badgeControls" hidden><div class="style-row"><label>광고 표기 위치 <select id="badgeSide"><option value="left">왼쪽 위</option><option value="right" selected>오른쪽 위</option></select></label><label>글자 크기 <input id="badgeSize" type="number" min="16" max="90" value="40"></label></div>
 <div class="style-row"><label>옆에서 거리 <input id="badgeX" type="number" min="0" max="500" value="39"></label><label>위에서 거리 <input id="badgeY" type="number" min="0" max="1800" value="44"></label></div><p class="muted">[광고] 표기는 영상 처음부터 끝까지 떠 있어요. 거리는 1080×1920 화면 기준 픽셀입니다.</p></div>
 <p class="voice-note">내레이션 · 일반여성2</p></details>
+<details id="thumbnailPanel" hidden open><summary>썸네일 (영상 맨 앞 0.1초)</summary>
+<label class="field"><span><input id="thumbEnabled" type="checkbox" checked> 영상 맨 앞에 썸네일 넣기</span></label>
+<label class="field">썸네일 제목<textarea id="thumbText" maxlength="60" rows="2" placeholder="예: 녹이 싹 사라져요 (줄을 바꾸면 두 줄로 나와요)"></textarea></label>
+<button id="thumbPick" class="outline" type="button">지금 보는 화면을 썸네일 사진으로</button>
+<p id="thumbFrameInfo" class="muted">썸네일 사진: 첫 컷의 첫 화면(자동)</p>
+<div class="style-row"><label>제목 글자 크기 <input id="thumbSize" type="number" min="20" max="220" value="110"></label><label>글자 색 <input id="thumbColor" type="color" value="#ffe500"></label></div>
+<div class="style-row"><label>위아래 위치 <input id="thumbY" type="number" min="-35" max="35" step="0.5" value="18"></label><label>좌우 위치 <input id="thumbX" type="number" min="-35" max="35" step="0.5" value="0"></label></div>
+<div class="style-row"><label>검정 외곽선 <input id="thumbOutline" type="number" min="0" max="24" value="10"></label><label>정렬 <select id="thumbAlign"><option value="left">왼쪽</option><option value="center" selected>가운데</option><option value="right">오른쪽</option></select></label></div>
+<div class="style-row"><label>배경 불투명도(%) <input id="thumbBg" type="number" min="0" max="100" value="0"></label><label>검정 그림자 <input id="thumbShadow" type="number" min="0" max="12" value="0"></label></div>
+<button id="thumbShow" class="outline" type="button">썸네일 미리보기</button>
+<p class="muted">위아래 위치는 양수가 위쪽입니다. 썸네일 제목은 본문 자막과 따로 설정돼요.</p></details>
 <button id="saveStyle" class="outline" disabled>변경 사항 저장</button>
 <div class="export-section"><h3>영상 생성</h3><label class="field">크레딧을 사용할 계정<select id="workspace"><option value="">계정을 먼저 연결해 주세요</option></select></label><details id="modelPanel"><summary id="modelSummary">영상 모델</summary><p class="muted">모델마다 화질과 크레딧이 다릅니다. 비교는 내 사진 1장으로 무료 견적을 조회하며 크레딧을 쓰지 않습니다.</p><button id="compareModels" class="outline">모델별 화질·크레딧 비교</button><div id="modelList" class="model-list" role="radiogroup" aria-label="영상 생성 모델"></div></details><button id="quote" class="dark" disabled>크레딧 견적 확인 →</button><p class="muted">견적 확인은 무료입니다. 금액을 확인하고 승인하면 생성이 시작됩니다.</p><div id="quoteBox" hidden><p>이번 생성에 필요한 크레딧</p><strong id="credits">0</strong><p id="quoteBreakdown"></p><button id="approve" class="mint">이 금액 사용 승인 & 영상 만들기</button></div><button id="rerender" class="outline" hidden>저장된 결과로 다시 합성 · 추가 비용 없음</button><button id="resume" class="outline" hidden>중단된 작업 이어서 진행</button>
 <div id="exportDownloads" class="export-downloads" aria-labelledby="exportHeading">

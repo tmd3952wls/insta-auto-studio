@@ -75,6 +75,8 @@ def render_revision(job):
         'voices': job.narration, 'motions': job.generated}
     if job.domain == 'stay':
         value['motion_timing_version'] = 2
+    if job.storyboard and job.storyboard.segments:  # Video domains open on a thumbnail still.
+        value['thumbnail'] = job.options.thumbnail.model_dump()
     disclosure = domains.load(job.domain).disclosure
     if not domains.load(job.domain).features.narration:
         value['narration'] = False

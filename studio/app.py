@@ -20,7 +20,7 @@ from . import assets, codex, collector, composition, domains, enhance, performan
 from .drama import Drama
 from .fish import Fish
 from .media import badge_image, caption_image, caption_segments, crop_photo, crop_video_frame, preview_image
-from .models import ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, CreateOptions, CropBox, CropFocus, Job, Storyboard
+from .models import ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, Thumbnail, CreateOptions, CropBox, CropFocus, Job, Storyboard
 from .paths import DATA, RESOURCES, initialize, job_path
 from .pipeline import Pipeline
 
@@ -38,7 +38,8 @@ def saved_options():
     try:
         saved = json.loads(style_file().read_text(encoding='utf-8'))
         return CreateOptions(caption=saved['caption'], speed=saved['speed'],
-                             **({'badge': saved['badge']} if 'badge' in saved else {}))
+                             **({'badge': saved['badge']} if 'badge' in saved else {}),
+                             **({'thumbnail': {'style': saved['thumbnail_style']}} if 'thumbnail_style' in saved else {}))
     except (OSError, ValueError, KeyError, TypeError):
         return CreateOptions()
 
@@ -615,15 +616,18 @@ async def style(job_id: str, options: CreateOptions):
         raise ValueError('작업이 끝난 뒤 자막 설정을 변경해 주세요.')
     job = store.read(job_id)
     if job.workflow_version >= 2 and (job.options.caption != options.caption or job.options.speed != options.speed
-                                      or job.options.badge != options.badge):
+                                      or job.options.badge != options.badge
+                                      or job.options.thumbnail != options.thumbnail):
         job.result = None
     job.options.caption = options.caption
     job.options.badge = options.badge
+    job.options.thumbnail = options.thumbnail
     job.options.speed = options.speed
     store.save(job)
     initialize()
     style_file().write_text(json.dumps({'caption': options.caption.model_dump(), 'speed': options.speed,
-                                        'badge': options.badge.model_dump()}), encoding='utf-8')
+                                        'badge': options.badge.model_dump(),
+                                        'thumbnail_style': options.thumbnail.style.model_dump()}), encoding='utf-8')
     return job.model_dump()
 
 
@@ -981,6 +985,19 @@ async def preview(job_id: str, value: dict):
     image = await asyncio.to_thread(preview_image, job_path(job_id) / job.photos[index]['file'], text, caption, focus)
     data = io.BytesIO()
     image.save(data, format='JPEG', quality=95)
+    return Response(data.getvalue(), media_type='image/jpeg')
+
+
+@app.post('/api/jobs/{job_id}/thumbnail-preview')
+async def thumbnail_preview(job_id: str, value: dict):
+    """The reel's opening still with a draft title style, so it can be set by eye before rendering."""
+    from .render import thumbnail_images
+    job = store.read(job_id)
+    choice = Thumbnail.model_validate(value.get('thumbnail', {}))
+    badge = BadgeStyle.model_validate(value['badge']) if 'badge' in value else None
+    _, image = await asyncio.to_thread(thumbnail_images, job, job_path(job_id), choice, badge)
+    data = io.BytesIO()
+    image.save(data, format='JPEG', quality=92)
     return Response(data.getvalue(), media_type='image/jpeg')
 
 

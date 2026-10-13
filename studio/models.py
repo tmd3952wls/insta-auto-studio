@@ -63,6 +63,25 @@ class BadgeStyle(BaseModel):
     size: int = Field(40, ge=16, le=90)
 
 
+class TitleStyle(CaptionStyle):
+    """The thumbnail title's own look: larger and brighter than the running captions."""
+    font_size: int = Field(110, ge=20, le=220)
+    y: float = Field(18, ge=-35, le=35)
+    color: str = Field('#FFE500', pattern=r'^#[0-9a-fA-F]{6}$')
+    outline: int = Field(10, ge=0, le=24)
+    background_opacity: float = Field(0, ge=0, le=1)
+    shadow: int = Field(0, ge=0, le=12)
+
+
+class Thumbnail(BaseModel):
+    """Video domains: a still from a source video that opens the reel for 0.1 s so it becomes the cover."""
+    enabled: bool = True
+    text: str = Field('', max_length=60)
+    source: int | None = Field(None, ge=0)  # None: the first segment's own first frame.
+    time: float = Field(0, ge=0)
+    style: TitleStyle = Field(default_factory=TitleStyle)
+
+
 class Scene(BaseModel):
     id: str = ''
     photos: list[int] = Field(min_length=1)
@@ -237,6 +256,7 @@ class CreateOptions(BaseModel):
     max_motion: int = Field(7, ge=0)  # Clips are paid per clip; each 4s clip is split into several cuts.
     caption: CaptionStyle = Field(default_factory=CaptionStyle)
     badge: BadgeStyle = Field(default_factory=BadgeStyle)
+    thumbnail: Thumbnail = Field(default_factory=Thumbnail)
     speed: float = Field(1.0, ge=0.75, le=1.25)
 
 

@@ -11,7 +11,8 @@ from array import array
 from pathlib import Path
 
 from . import domains
-from .media import allocate_frames, badge_image, caption_image, caption_segments, crop_photo, cut_zoom, motion_cuts, srt_time
+from .media import (allocate_frames, badge_image, caption_image, caption_segments, crop_photo, crop_video_frame,
+                    cut_zoom, motion_cuts, srt_time)
 from .assets import render_revision
 from .models import MAX_CUT, MIN_CUT, MIN_MOTION_SIDE
 from . import performance
@@ -24,6 +25,7 @@ QUICK_PAUSE = 0.03  # Video domains: the next sentence starts as soon as the las
 SILENCE = 328  # About -40dBFS on 16-bit samples.
 CAPTION_LEAD = 0.1  # Seconds a mid-sentence caption appears before its estimated spoken start.
 RENDER_WORKERS = 2
+OPENING_FRAMES = 3  # 0.1 s: enough for apps to offer it as the cover, too short to notice in playback.
 
 
 def encode_clips(commands, progress, workers=RENDER_WORKERS):
@@ -124,6 +126,37 @@ def motion_filter(start, end, frames, source_fps, fill=None, smooth=True):
             f'tpad=stop_mode=clone:stop=3,settb=AVTB,setpts=PTS*{factor:.8f},{cadence},'
             f'tpad=stop_mode=clone:stop=2,{fill},'
             f'trim=end_frame={frames},settb=1/30,setpts=N,setsar=1')
+
+
+def thumbnail_images(job, folder, choice=None, badge=None):
+    """(still, titled) 1080x1920 images for a video-domain reel's opening frame: a source frame zoomed by its
+    subtitle-hiding crop, and the same frame with the thumbnail title and the domain's notice on top."""
+    choice = choice or job.options.thumbnail
+    videos = [index for index, item in enumerate(job.photos) if item.get('kind') == 'video']
+    first = job.storyboard.segments[0] if job.storyboard and job.storyboard.segments else None
+    if choice.source in videos:
+        index, seconds = choice.source, choice.time
+    elif first:
+        index, seconds = first.source, first.start
+    elif videos:
+        index, seconds = videos[0], 0.0
+    else:
+        raise ValueError('썸네일로 쓸 영상이 없습니다.')
+    item = job.photos[index]
+    seconds = min(seconds, max(item.get('duration', seconds) - 0.05, 0))
+    frames = folder / 'frames'
+    frames.mkdir(exist_ok=True)
+    frame = frames / f'{index:03}-{seconds:.2f}.jpg'
+    if not frame.is_file():
+        video_frame(folder / item['file'], seconds, frame)
+    still = crop_video_frame(frame, item.get('crop', {})).convert('RGBA')
+    titled = still.copy()
+    if choice.text.strip():
+        titled.alpha_composite(caption_image(choice.text, choice.style))
+    disclosure = domains.load(job.domain).disclosure
+    if disclosure:
+        titled.alpha_composite(badge_image(disclosure, badge or job.options.badge))
+    return still.convert('RGB'), titled.convert('RGB')
 
 
 def crop_filter(crop):
@@ -258,6 +291,26 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
         fill[index] = crop_filter(item.get('crop', {}))
     narrated = domains.load(job.domain).features.narration
     longest = MAX_CUT if job.storyboard.segments else None  # Video domains keep every cut within MAX_CUT.
+    opening = OPENING_FRAMES if job.storyboard.segments and job.options.thumbnail.enabled else 0
+    if opening:
+        # The reel opens on a titled still so the first frame works as its cover.
+        stills = [export / 'opening-clean.png', export / 'opening.png']
+        for image, target in zip(thumbnail_images(job, folder), stills):
+            image.save(target)
+        clips.append(export / 'clip-opening.mp4')
+        clean_clips.append(export / 'clean-opening.mp4')
+        encoding = ['-an', '-frames:v', opening, '-r', '30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18',
+                    '-preset', 'fast', '-threads', '2', '-movflags', '+faststart']
+        commands.append(('-loop', '1', '-framerate', '30', '-i', stills[0], '-loop', '1', '-framerate', '30', '-i', stills[1],
+                         '-filter_complex', '[0:v]format=yuv420p,setsar=1[clean];[1:v]format=yuv420p,setsar=1[v]',
+                         '-map', '[clean]', *encoding, clean_clips[0], '-map', '[v]', *encoding, clips[0]))
+        offset = opening / 30
+        if narrated:
+            quiet = export / 'padded-opening.wav'
+            with wave.open(str(quiet), 'wb') as output:
+                output.setparams((2, 2, 48000, 0, 'NONE', 'not compressed'))
+                output.writeframes(bytes(48000 * opening // 30 * 4))
+            audio_clips.append(quiet)
     for scene_index, scene in enumerate(job.storyboard.scenes):
         if narrated:
             record = job.narration.get(str(scene_index), {})
@@ -390,7 +443,7 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
     (publish / 'stay-script.txt').write_text('\n\n'.join(scene.text for scene in job.storyboard.scenes) + '\n', encoding='utf-8-sig')
     run('-i', pending, '-frames:v', '1', publish / 'preview.jpg')
     report = {'width': 1080, 'height': 1920, 'fps': 30, 'duration': offset,
-              'frames': sum(item['frames'] for item in timeline), 'photos': len(timeline),
+              'frames': opening + sum(item['frames'] for item in timeline), 'photos': len(timeline),
               'timeline': timeline, 'caption': job.options.caption.model_dump(), 'fully_decoded': True,
               'exports': {'final': 'stay-reel.mp4', 'video': 'stay-video.mp4',
                           **({'audio': 'stay-voice.mp3'} if narrated else {}),
