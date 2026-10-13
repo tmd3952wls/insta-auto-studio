@@ -80,6 +80,7 @@ def render_revision(job):
         value['narration'] = False
     if disclosure:  # Only domains that show one; stay revisions keep their old value.
         value['disclosure'] = disclosure
+        value['badge'] = job.options.badge.model_dump()
     return stable_hash(value)
 
 

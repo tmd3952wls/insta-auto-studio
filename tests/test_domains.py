@@ -150,7 +150,7 @@ class DisclosureRenderTests(unittest.TestCase):
         def corner(key):
             run('-i', folder / result[key], '-frames:v', '1', folder / f'{key}.png')
             with Image.open(folder / f'{key}.png') as image:
-                return max(high - low for low, high in image.crop((40, 200, 400, 290)).convert('RGB').getextrema())
+                return max(high - low for low, high in image.crop((880, 30, 1060, 100)).convert('RGB').getextrema())
         return corner('file'), corner('video')
 
     def test_shopping_reel_shows_the_disclosure_but_the_clean_video_does_not(self):

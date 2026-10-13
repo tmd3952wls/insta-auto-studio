@@ -19,8 +19,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from . import assets, codex, collector, composition, domains, enhance, performance, recommendation, store, video_models
 from .drama import Drama
 from .fish import Fish
-from .media import caption_image, caption_segments, crop_photo, crop_video_frame, preview_image
-from .models import ApproveRequest, CaptionPresetRequest, CaptionStyle, CreateOptions, CropBox, CropFocus, Job, Storyboard
+from .media import badge_image, caption_image, caption_segments, crop_photo, crop_video_frame, preview_image
+from .models import ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, CreateOptions, CropBox, CropFocus, Job, Storyboard
 from .paths import DATA, RESOURCES, initialize, job_path
 from .pipeline import Pipeline
 
@@ -37,7 +37,8 @@ def style_file():
 def saved_options():
     try:
         saved = json.loads(style_file().read_text(encoding='utf-8'))
-        return CreateOptions(caption=saved['caption'], speed=saved['speed'])
+        return CreateOptions(caption=saved['caption'], speed=saved['speed'],
+                             **({'badge': saved['badge']} if 'badge' in saved else {}))
     except (OSError, ValueError, KeyError, TypeError):
         return CreateOptions()
 
@@ -613,13 +614,16 @@ async def style(job_id: str, options: CreateOptions):
     if pipeline.busy(job_id):
         raise ValueError('작업이 끝난 뒤 자막 설정을 변경해 주세요.')
     job = store.read(job_id)
-    if job.workflow_version >= 2 and (job.options.caption != options.caption or job.options.speed != options.speed):
+    if job.workflow_version >= 2 and (job.options.caption != options.caption or job.options.speed != options.speed
+                                      or job.options.badge != options.badge):
         job.result = None
     job.options.caption = options.caption
+    job.options.badge = options.badge
     job.options.speed = options.speed
     store.save(job)
     initialize()
-    style_file().write_text(json.dumps({'caption': options.caption.model_dump(), 'speed': options.speed}), encoding='utf-8')
+    style_file().write_text(json.dumps({'caption': options.caption.model_dump(), 'speed': options.speed,
+                                        'badge': options.badge.model_dump()}), encoding='utf-8')
     return job.model_dump()
 
 
@@ -994,6 +998,10 @@ def video_preview(job, index, value, text, caption):
     image = crop_video_frame(frame, crop).convert('RGBA')
     if text.strip():
         image.alpha_composite(caption_image(text, caption))
+    disclosure = domains.load(job.domain).disclosure
+    if disclosure:  # Shown here so its position can be set by eye.
+        badge = BadgeStyle.model_validate(value['badge']) if 'badge' in value else job.options.badge
+        image.alpha_composite(badge_image(disclosure, badge))
     return image.convert('RGB')
 
 

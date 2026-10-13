@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
-from .models import CaptionStyle
+from .models import BadgeStyle, CaptionStyle
 from .paths import font_path
 
 SIZE = (1080, 1920)
@@ -99,17 +99,15 @@ def caption_image(text: str, style: CaptionStyle | None = None) -> Image.Image:
     return layer
 
 
-def badge_image(text: str, size=30) -> Image.Image:
-    """A small fixed notice (e.g. an affiliate disclosure) at the top left, below the Reels header."""
-    font = ImageFont.truetype(str(font_path()), size)
+def badge_image(text: str, style: BadgeStyle | None = None) -> Image.Image:
+    """A small fixed notice (e.g. [광고]) pinned `x` pixels in from the chosen side and `y` down from the top."""
+    style = style or BadgeStyle()
+    font = ImageFont.truetype(str(font_path()), style.size)
     layer = Image.new('RGBA', SIZE)
-    draw = ImageDraw.Draw(layer)
-    left, top = 48, 230
-    bounds = draw.textbbox((left, top), text, font=font)
-    pad = round(size * 0.45)
-    draw.rounded_rectangle((bounds[0] - pad, bounds[1] - pad, bounds[2] + pad, bounds[3] + pad),
-                           radius=pad, fill=(0, 0, 0, 140))
-    draw.text((left, top), text, font=font, fill=(255, 255, 255, 235))
+    right = style.side == 'right'
+    ImageDraw.Draw(layer).text((SIZE[0] - style.x if right else style.x, style.y), text, font=font,
+                               anchor='rt' if right else 'lt', fill='white',
+                               stroke_width=max(2, style.size // 10), stroke_fill='black')
     return layer
 
 
@@ -167,18 +165,23 @@ def allocate_frames(audio_seconds: float, motion_flags: list[bool], fps=30) -> l
     return counts
 
 
-def motion_cuts(frames: int, fps=30) -> list[int]:
-    """Start frames of the cuts one photo's shot is split into: two once it lasts SPLIT_SECONDS, else one."""
-    count = len(CUT_ZOOMS) if frames >= SPLIT_SECONDS * fps else 1
+def motion_cuts(frames: int, fps=30, longest=None) -> list[int]:
+    """Start frames of the cuts one photo's shot is split into: two once it lasts SPLIT_SECONDS, else one.
+    With `longest` (video domains) a shot is split only as often as needed to keep every cut within that many seconds."""
+    if longest:
+        count = max(1, math.ceil(frames / (longest * fps)))
+    else:
+        count = len(CUT_ZOOMS) if frames >= SPLIT_SECONDS * fps else 1
     return [frames * index // count for index in range(count)]
 
 
-def cut_zoom(frames: int, fps=30) -> str:
+def cut_zoom(frames: int, fps=30, longest=None) -> str:
     """ffmpeg zoom expression that punches in at each cut, so one clip reads as several shots."""
-    starts = motion_cuts(frames, fps)
-    expression = str(CUT_ZOOMS[len(starts) - 1])
+    starts = motion_cuts(frames, fps, longest)
+    zooms = [CUT_ZOOMS[index % len(CUT_ZOOMS)] for index in range(len(starts))]
+    expression = str(zooms[-1])
     for index in range(len(starts) - 1, 0, -1):
-        expression = f'if(lt(on,{starts[index]}),{CUT_ZOOMS[index - 1]},{expression})'
+        expression = f'if(lt(on,{starts[index]}),{zooms[index - 1]},{expression})'
     return expression
 
 

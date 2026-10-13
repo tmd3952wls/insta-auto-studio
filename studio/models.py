@@ -17,6 +17,7 @@ CLIP_PHOTOS = 4  # Reference images per clip; four kept each shot faithful in th
 MIN_CLIP_SECONDS = 4  # Shortest clip Fish video models accept.
 MAX_CLIP_SECONDS = 15  # Longest clip a Motion may ask for (Motion.seconds).
 MIN_SEGMENT, MAX_SEGMENT = 0.5, 8.0  # Seconds of source video one shot may use.
+MIN_CUT, MAX_CUT = 1.0, 2.0  # Seconds one cut of a video-domain reel stays on screen.
 
 
 def plan_clips(order: list[int], total=TARGET_SECONDS) -> list[dict]:
@@ -52,6 +53,14 @@ class CaptionStyle(BaseModel):
     def center(self, width=1080, height=1920):
         # VLLO screenshot calibration: positive Y moves upward from center.
         return round(width * (0.5 + self.x / 100)), round(height * (0.5 - self.y / 100))
+
+
+class BadgeStyle(BaseModel):
+    """Where a domain's fixed notice (shopping: [광고]) sits on the final reel."""
+    side: Literal['left', 'right'] = 'right'
+    x: int = Field(39, ge=0, le=500)  # Pixels in from that side of the 1080-wide frame.
+    y: int = Field(44, ge=0, le=1800)  # Pixels down from the top.
+    size: int = Field(40, ge=16, le=90)
 
 
 class Scene(BaseModel):
@@ -227,6 +236,7 @@ class Storyboard(BaseModel):
 class CreateOptions(BaseModel):
     max_motion: int = Field(7, ge=0)  # Clips are paid per clip; each 4s clip is split into several cuts.
     caption: CaptionStyle = Field(default_factory=CaptionStyle)
+    badge: BadgeStyle = Field(default_factory=BadgeStyle)
     speed: float = Field(1.0, ge=0.75, le=1.25)
 
 

@@ -31,6 +31,10 @@ class StudioCoreTests(unittest.TestCase):
         self.assertEqual(motion_cuts(45), [0])  # 1.5s shot stays one cut.
         self.assertEqual(cut_zoom(60), 'if(lt(on,30),1.0,1.15)')
         self.assertEqual(cut_zoom(45), '1.0')
+        # Video domains split a shot only when it would stay on screen past the limit.
+        self.assertEqual(motion_cuts(60, longest=2.0), [0])
+        self.assertEqual(motion_cuts(75, longest=2.0), [0, 37])
+        self.assertEqual(cut_zoom(150, longest=2.0), 'if(lt(on,50),1.0,if(lt(on,100),1.15,1.0))')
 
     def test_clip_plan_groups_three_to_four_photos_into_25_seconds(self):
         from studio.models import plan_clips

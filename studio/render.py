@@ -11,9 +11,9 @@ from array import array
 from pathlib import Path
 
 from . import domains
-from .media import allocate_frames, badge_image, caption_image, caption_segments, crop_photo, cut_zoom, srt_time
+from .media import allocate_frames, badge_image, caption_image, caption_segments, crop_photo, cut_zoom, motion_cuts, srt_time
 from .assets import render_revision
-from .models import MIN_MOTION_SIDE
+from .models import MAX_CUT, MIN_CUT, MIN_MOTION_SIDE
 from . import performance
 from .paths import RESOURCES, job_path
 
@@ -235,7 +235,7 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
     disclosure = domains.load(job.domain).disclosure
     badge = export / 'disclosure.png' if disclosure else None
     if badge:
-        badge_image(disclosure).save(badge)
+        badge_image(disclosure, job.options.badge).save(badge)
     clips, clean_clips, audio_clips, subtitles, timeline = [], [], [], [], []
     commands = []
     offset = 0
@@ -256,6 +256,7 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
         shots[index] = (folder / item['file'], segment.start, segment.end)
         fill[index] = crop_filter(item.get('crop', {}))
     narrated = domains.load(job.domain).features.narration
+    longest = MAX_CUT if job.storyboard.segments else None  # Video domains keep every cut within MAX_CUT.
     for scene_index, scene in enumerate(job.storyboard.scenes):
         if narrated:
             record = job.narration.get(str(scene_index), {})
@@ -320,7 +321,7 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
                 base = (f'trim=start={start:.3f}:end={end:.3f},setpts=(PTS-STARTPTS)*{speed:.4f},'
                         f"{fill.get(photo_index, 'scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920')},fps=30,"
                         f'tpad=stop_mode=clone:stop_duration={count/30+1},'
-                        f"zoompan=z='{cut_zoom(count) if narrated else '1.0'}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1920:fps=30,setsar=1")
+                        f"zoompan=z='{cut_zoom(count, longest=longest) if narrated else '1.0'}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1920:fps=30,setsar=1")
                 if job.domain == 'stay':
                     base = motion_filter(start, end, count, source_rates[source], fill.get(photo_index))
             else:
@@ -399,10 +400,16 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
             continue
         (publish / name).replace(folder / (prefix + name))
     warnings = []
-    minimum, maximum = (25, 35) if narrated else (16, 20)
+    minimum, maximum = (20, 28) if longest else (25, 35) if narrated else (16, 20)
     if not minimum <= offset <= maximum:
         warnings.append(f'실제 길이가 {offset:.1f}초입니다. 권장 길이는 {minimum}~{maximum}초입니다.')
-    if offset / len(timeline) < 1.5:
+    if longest:
+        # Longer shots are already split by a punch-in; a short one can only be fixed by using fewer segments.
+        short = sum(item['frames'] / len(motion_cuts(item['frames'], longest=longest)) < MIN_CUT * 30 - 1
+                    for item in timeline)
+        if short:
+            warnings.append(f'{short}개 컷이 {MIN_CUT:g}초보다 짧습니다. 그 장면의 구간 수를 줄여 보세요.')
+    elif offset / len(timeline) < 1.5:
         warnings.append('사진당 평균 노출이 1.5초보다 짧습니다. 사진 수를 줄여 보세요.')
     if timeline[-1]['frames'] < 30:
         warnings.append('마지막 사진의 노출이 1초보다 짧습니다.')

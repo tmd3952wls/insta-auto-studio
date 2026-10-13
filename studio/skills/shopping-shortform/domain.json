@@ -106,7 +106,7 @@
     "facts_title": "상품 정보",
     "facts_help": "대본의 사실 근거로만 쓰여요. 상품명은 영상에서 말하지 않아요. 가격·효능은 여기에 적은 것만 대본에 들어가요."
   },
-  "disclosure": "광고 · 제휴 링크 포함",
+  "disclosure": "[광고]",
   "media": "video",
   "min_media": 3,
   "max_media": 10,

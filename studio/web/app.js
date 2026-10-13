@@ -87,6 +87,7 @@ function drawDomain(){
   $('sourceHeading').textContent=ui.heading;$('photoPreview').textContent=ui.select;
   $('stepPhotosLabel').textContent=`${ui.noun} 선택`;$('factsTitle').textContent=ui.facts_title||`${info.label} 정보`;$('factsHelp').textContent=ui.facts_help||'대본의 사실 근거로만 쓰여요. 가격·효능 같은 사실은 여기에 적은 것만 대본에 들어가요.';
   document.querySelector('input[name=compositionMode][value=ai]').closest('label').hidden=!info.features.ai_composition;
+  $('badgeControls').hidden=!info.disclosure;
   $('captionText').defaultValue=ui.caption_default||'';if(!job?.storyboard)$('captionText').value=$('captionText').defaultValue;
   if(compositionMode()==='ai')$('compositionHelp').textContent=ui.ai_help||'';
   const fields=$('factsFields');fields.replaceChildren();$('factsPanel').hidden=!job||!info.facts.length;
@@ -99,8 +100,10 @@ function confirmDiscard(){return !hasUnsavedEdits()||window.confirm('저장하�
 window.addEventListener('beforeunload',event=>{if(hasUnsavedEdits()){event.preventDefault();event.returnValue='';}});
 function numericValid(){return numericControls.every(id=>$(id+'Input').validity.valid);}
 function caption(){if(!numericValid())throw new Error('글자 크기와 X/Y 위치의 입력 범위를 확인해 주세요.');return {font_size:Number($('fontSize').value),x:Number($('posX').value),y:Number($('posY').value),color:$('color').value,outline:Number($('outline').value),background_opacity:Number($('bgOpacity').value)/100,shadow:Number($('shadow').value),align:$('captionAlign').value};}
-function options(){return {max_motion:Number($('motion').value),caption:caption(),speed:Number($('speed').value)};}
-function loadStyle(options=job?.options){if(!options)return;const c=options.caption;for(const [id,key] of [['fontSize','font_size'],['posX','x'],['posY','y'],['color','color'],['outline','outline'],['shadow','shadow']])$(id).value=c[key];$('captionAlign').value=c.align||'center';for(const id of numericControls){$(id+'Input').value=$(id).value;$(id+'Error').hidden=true;$(id+'Input').removeAttribute('aria-invalid');}$('bgOpacity').value=Math.round(c.background_opacity*100);$('speed').value=String(options.speed??1);motionOptions();updateOutputs();}
+const badgeControls=['badgeSide','badgeSize','badgeX','badgeY'];
+function badge(){if(!badgeControls.slice(1).every(id=>$(id).validity.valid))throw new Error('광고 표기의 크기와 거리 입력 범위를 확인해 주세요.');return {side:$('badgeSide').value,size:Number($('badgeSize').value),x:Number($('badgeX').value),y:Number($('badgeY').value)};}
+function options(){return {max_motion:Number($('motion').value),caption:caption(),badge:badge(),speed:Number($('speed').value)};}
+function loadStyle(options=job?.options){if(!options)return;const c=options.caption;if(options.badge){$('badgeSide').value=options.badge.side;$('badgeSize').value=options.badge.size;$('badgeX').value=options.badge.x;$('badgeY').value=options.badge.y;}for(const [id,key] of [['fontSize','font_size'],['posX','x'],['posY','y'],['color','color'],['outline','outline'],['shadow','shadow']])$(id).value=c[key];$('captionAlign').value=c.align||'center';for(const id of numericControls){$(id+'Input').value=$(id).value;$(id+'Error').hidden=true;$(id+'Input').removeAttribute('aria-invalid');}$('bgOpacity').value=Math.round(c.background_opacity*100);$('speed').value=String(options.speed??1);motionOptions();updateOutputs();}
 function drawCaptionPresets(selected=$('captionPreset').value){$('captionPreset').replaceChildren(new Option('설정을 선택하세요',''));for(const item of captionPresets)$('captionPreset').append(new Option(item.name,item.id));$('captionPreset').value=selected;}
 $('captionPreset').onchange=action(async()=>{const item=captionPresets.find(p=>p.id===$('captionPreset').value);if(!item)return;loadStyle({caption:item.caption,speed:Number($('speed').value)});$('captionPresetName').value=item.name;if(job){dirtyStyle=true;queuePreview();}drawStatus();$('captionPresetNotice').textContent=`${item.name} 설정을 불러왔어요.`;});
 $('saveCaptionPreset').onclick=action(async()=>{const name=$('captionPresetName').value.trim();if(!name)throw new Error('저장할 자막 설정의 이름을 입력해 주세요.');const item=await api('/api/caption-presets',{name,caption:caption()});captionPresets=await api('/api/caption-presets');drawCaptionPresets(item.id);$('captionPresetNotice').textContent=`${item.name} 설정을 저장했어요. 다른 작업에서도 선택할 수 있어요.`;});
@@ -119,7 +122,7 @@ async function updatePreview(){
   captionCueCount=cues.length;selectedCaptionCue=Math.min(selectedCaptionCue,Math.max(cues.length-1,0));captionCueControls.replaceChildren();captionCueControls.hidden=cues.length<2;
   for(const [index,text] of cues.entries()){const button=document.createElement('button');button.type='button';button.className='outline';button.textContent=`${index+1}. ${text}`;button.setAttribute('aria-pressed',String(index===selectedCaptionCue));button.onclick=action(async()=>{selectedCaptionCue=index;await updatePreview();});captionCueControls.append(button);}
   const text=cues[selectedCaptionCue]||'';
-  const body=job.photos[photo]?.kind==='video'?{photo,time:previewTime,text,caption:style,...(cropDraft?{crop:cropDraft}:{})}
+  const body=job.photos[photo]?.kind==='video'?{photo,time:previewTime,text,caption:style,badge:badge(),...(cropDraft?{crop:cropDraft}:{})}
     :{photo,text,caption:style,...(focus?{focus:{x:focus.x,y:focus.y}}:{})};
   const blob=await api(`/api/jobs/${id}/preview`,body,true);
   if(sequence!==previewSequence||job?.id!==id||selectedPhoto!==photo||previewMode!=='photo')return;
@@ -384,7 +387,7 @@ function drawStatus(){
   for(const button of document.querySelectorAll('.history-job'))button.disabled=sourceBusy;
   drawCollection();
   motionControls();
-  for(const id of [...numericControls,...numericControls.map(id=>id+'Input'),'captionText','color','outline','bgOpacity','shadow','speed','motion','captionAlign'])$(id).disabled=Boolean(busy);
+  for(const id of [...numericControls,...numericControls.map(id=>id+'Input'),'captionText','color','outline','bgOpacity','shadow','speed','motion','captionAlign',...badgeControls])$(id).disabled=Boolean(busy);
   $('captionPreset').disabled=Boolean(busy);$('saveCaptionPreset').disabled=Boolean(busy)||!numericValid();
   $('motion').disabled=Boolean(busy)||!job;
   $('captionText').disabled=!job?.storyboard||Boolean(busy)||planLocked();
@@ -477,7 +480,7 @@ async function restoreCollection(){
   catch{try{localStorage.removeItem('stayCollection');}catch{}}
 }
 $('files').onchange=action(()=>upload([...$('files').files]));for(const event of ['dragenter','dragover'])$('dropZone').addEventListener(event,e=>{e.preventDefault();if(!$('files').disabled)$('dropZone').classList.add('dragover');});$('dropZone').addEventListener('dragleave',()=>$('dropZone').classList.remove('dragover'));$('dropZone').addEventListener('drop',e=>{e.preventDefault();$('dropZone').classList.remove('dragover');upload([...e.dataTransfer.files]).catch(showError);});
-for(const id of ['color','outline','bgOpacity','shadow','captionText','captionAlign'])$(id).addEventListener('input',queuePreview);
+for(const id of ['color','outline','bgOpacity','shadow','captionText','captionAlign',...badgeControls])$(id).addEventListener('input',queuePreview);
 for(const id of numericControls){
   $(id).addEventListener('input',()=>{$(id+'Input').value=$(id).value;$(id+'Error').hidden=true;$(id+'Input').removeAttribute('aria-invalid');queuePreview();drawStatus();});
   $(id+'Input').addEventListener('input',()=>{const valid=$(id+'Input').validity.valid;$(id+'Error').hidden=valid;$(id+'Input').setAttribute('aria-invalid',String(!valid));if(valid){$(id).value=$(id+'Input').value;queuePreview();}else{++previewSequence;clearTimeout(previewTimer);}drawStatus();});
@@ -607,7 +610,7 @@ function mediaControls(kind,index){
 }
 for(const radio of document.querySelectorAll('input[name=compositionMode]'))radio.onchange=()=>{$('aiControls').hidden=compositionMode()!=='ai';$('compositionHelp').textContent=compositionMode()==='ai'?(domainInfo()?.ui.ai_help||''):'선택한 순서를 그대로 사용합니다. 사진을 끌거나 이동 버튼으로 순서를 바꾸세요.';drawStatus();};
 $('targetCount').oninput=drawStatus;
-for(const id of [...numericControls,...numericControls.map(id=>id+'Input'),'color','outline','bgOpacity','shadow','speed','captionAlign'])$(id).addEventListener('input',()=>{if(job)dirtyStyle=true;drawStatus();});
+for(const id of [...numericControls,...numericControls.map(id=>id+'Input'),'color','outline','bgOpacity','shadow','speed','captionAlign',...badgeControls])$(id).addEventListener('input',()=>{if(job)dirtyStyle=true;drawStatus();});
 $('captionText').addEventListener('input',()=>{const scene=currentScene();if(scene&&!planLocked()&&$('captionText').value.trim()){scene.text=$('captionText').value;planChanged();drawScript();}});
 $('recommend').onclick=action(async()=>{if(!$('targetCount').validity.valid)throw new Error('추천 장수는 1~60장입니다.');await planTransaction(async()=>{if(hasUnsavedEdits())await persistEdits();job=await api('/api/composition',{job_id:job?.id,collection_id:collection?.id,photos:[...collectionSelected],mode:'ai',target_count:Number($('targetCount').value)});collectionSelected.clear();drawCollection();job=await api('/api/jobs/'+job.id);});});
 $('removeCandidates').onclick=action(async()=>{const active=new Set((job?.photos||[]).map(p=>p.sha256)),inUse=[...candidateSelected].filter(id=>active.has(id)).length;if(!window.confirm(`선택한 ${candidateSelected.size}장을 후보에서 제거할까요? AI 추천과 구성 선택에 더 이상 사용하지 않습니다.`+(inUse?`\n현재 영상에 쓰인 ${inUse}장도 영상 구성에서 빠집니다.`+(job.storyboard?' 대본은 다시 만들어야 합니다.':''):'')))return;await planTransaction(async()=>{if(hasUnsavedEdits())await persistEdits();job=await api(`/api/jobs/${job.id}/candidates/remove`,{ids:[...candidateSelected]});candidateSelected.clear();await loadJob(job.id);});});
