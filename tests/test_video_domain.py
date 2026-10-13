@@ -214,7 +214,7 @@ class VideoRenderTests(unittest.TestCase):
             job.narration = {'0': {'file': 'voice.wav'}}
             with patch('studio.render.job_path', return_value=folder):
                 result = render(job)
-            self.assertAlmostEqual(result['duration'], 2.15, delta=0.1)  # 2 s of voice plus the sentence pause.
+            self.assertAlmostEqual(result['duration'], 2.0, delta=0.05)  # 2 s of voice; fast-cut reels add no pause.
             def pixel(at):
                 run('-ss', str(at), '-i', folder / result['video'], '-frames:v', '1', folder / 'f.png')
                 with Image.open(folder / 'f.png') as image:

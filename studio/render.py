@@ -20,6 +20,7 @@ from .paths import RESOURCES, job_path
 # Pause lengths measured on the reference reel (2026-10-12): ~0.18s after each sentence, ~0.08s between phrases.
 SENTENCE_PAUSE = 0.15  # Breath after a sentence, scene ends included, so the next line does not run on.
 PHRASE_PAUSE = 0.08  # Longest pause kept inside a sentence; leading silence is dropped.
+QUICK_PAUSE = 0.03  # Video domains: the next sentence starts as soon as the last one ends.
 SILENCE = 328  # About -40dBFS on 16-bit samples.
 CAPTION_LEAD = 0.1  # Seconds a mid-sentence caption appears before its estimated spoken start.
 RENDER_WORKERS = 2
@@ -170,8 +171,8 @@ def sentences(text):
     return [part for part in re.split(r'(?<=[.?!])\s+', text.strip()) if part.strip()] or [text]
 
 
-def pace_pauses(source, target, breaks, scale=1.0, tail=SENTENCE_PAUSE):
-    """Rewrites a 16-bit wav with the `breaks` longest inner pauses set to SENTENCE_PAUSE, the tail to `tail` and
+def pace_pauses(source, target, breaks, scale=1.0, tail=SENTENCE_PAUSE, sentence=SENTENCE_PAUSE):
+    """Rewrites a 16-bit wav with the `breaks` longest inner pauses set to `sentence`, the tail to `tail` and
     other pauses capped at PHRASE_PAUSE (lengths multiplied by `scale`). Returns each sentence's (start, end) seconds."""
     with wave.open(str(source)) as audio:
         params, rate, channels = audio.getparams(), audio.getframerate(), audio.getnchannels()
@@ -197,7 +198,7 @@ def pace_pauses(source, target, breaks, scale=1.0, tail=SENTENCE_PAUSE):
             audio_out += samples[cursor * step:begin * step]
             if (begin, end) in chosen:
                 spans.append((sentence_start, len(audio_out) / channels / rate))
-                audio_out += silence(SENTENCE_PAUSE)
+                audio_out += silence(sentence)
                 sentence_start = len(audio_out) / channels / rate
             else:
                 audio_out += samples[begin * step:min(end, begin + round(PHRASE_PAUSE * scale * 100)) * step]
@@ -269,7 +270,10 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
             lines = sentences(scene.text)
             # Set pauses before atempo; a scene ending mid-sentence uses a phrase pause.
             tail = SENTENCE_PAUSE if re.search(r'[.?!…~]["\')\]]*$', scene.text.strip()) else PHRASE_PAUSE
-            spans = pace_pauses(decoded, paced, len(lines) - 1, job.options.speed, tail)
+            if longest:  # Fast-cut reels leave no breath between scenes.
+                tail = 0.0
+            spans = pace_pauses(decoded, paced, len(lines) - 1, job.options.speed, tail,
+                                QUICK_PAUSE if longest else SENTENCE_PAUSE)
             run('-i', paced, '-af', f'atempo={job.options.speed},loudnorm=I=-16:TP=-1.5:LRA=11',
                 '-ar', '48000', '-ac', '2', adjusted)
             with wave.open(str(adjusted)) as source:
