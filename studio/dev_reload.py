@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing
+import sys
 
 import uvicorn
 from uvicorn._subprocess import get_subprocess
@@ -46,6 +47,10 @@ class ReloadSupervisor(StatReload):
 
 
 def run(app, **settings):
+    if sys.platform == 'win32':
+        # uvicorn gives reload workers a SelectorEventLoop on Windows, which cannot start subprocesses:
+        # the yeogi image collector (Playwright) and Codex analysis both need them.
+        settings.setdefault('loop', 'asyncio:ProactorEventLoop')
     config = uvicorn.Config(app, factory=True, reload=True, **settings)
     config.shutdown_event = multiprocessing.get_context('spawn').Event()
     server = ReloadServer(config)

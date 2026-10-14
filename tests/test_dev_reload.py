@@ -42,3 +42,17 @@ class ReloadDeferralTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reload_waits_for_background_collection_to_finish(self):
         await self.check_deferral(background=True)
+
+
+class ReloadLoopTests(unittest.TestCase):
+    def test_windows_reload_worker_can_start_subprocesses(self):
+        # The image collector (Playwright) and Codex start subprocesses, which a SelectorEventLoop cannot do on Windows.
+        from studio import dev_reload
+        seen = {}
+        def capture(app, **settings):
+            seen.update(settings)
+            raise SystemExit
+        with patch('studio.dev_reload.sys.platform', 'win32'), patch('studio.dev_reload.uvicorn.Config', side_effect=capture):
+            with self.assertRaises(SystemExit):
+                dev_reload.run('launch:create_app', host='127.0.0.1', port=8765)
+        self.assertEqual(seen['loop'], 'asyncio:ProactorEventLoop')
