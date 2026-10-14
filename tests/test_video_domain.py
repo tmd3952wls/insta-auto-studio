@@ -167,6 +167,30 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertEqual(crops[1], {'zoom': 2.5, 'x': 0.0, 'y': 0.5, 'user': False})
         self.assertEqual(crops[2]['zoom'], 1.0)  # The user's own crop is kept.
 
+    def test_users_own_script_keeps_its_words_and_only_picks_segments(self):
+        script = '저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요.\n바보냐고\n수세미로 아무리 밀어도 안 지워지더라고요.'
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            job = video_job(folder, facts={'name': '녹 제거 가루', 'script': script})
+            seen = {}
+            async def fake(where, prompt, images, schema, name):
+                seen['prompt'] = prompt
+                answer = video_answer()
+                answer['scenes'] = [{'id': '', 'photos': [0], 'text': '바뀐 문장.'}]  # Ignored: the user's words win.
+                answer['segments'] = [{'source': 0, 'start': 0.0, 'end': 1.5}, {'source': 1, 'start': 0.0, 'end': 1.5},
+                                      {'source': 2, 'start': 0.0, 'end': 1.5}, {'source': 1, 'start': 2.0, 'end': 3.5}]
+                return answer
+            with patch('studio.codex.run_structured', fake), patch('studio.codex.job_path', return_value=folder):
+                plan = asyncio.run(codex.analyze_video(job))
+        self.assertIn('장면 1 (구간 2개): "저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요."', seen['prompt'])
+        self.assertNotIn('대본 후보 3개', seen['prompt'])
+        self.assertNotIn('바보냐고"', seen['prompt'].split('사용자가 입력한')[-1])  # The script is not repeated as a fact.
+        # "바보냐고" is too short for a cut of its own, so it joins the next line.
+        self.assertEqual([(s.text, s.photos) for s in plan.scenes],
+                         [('저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요.', [0, 1]),
+                          ('바보냐고, 수세미로 아무리 밀어도 안 지워지더라고요.', [2, 3])])
+        self.assertEqual([o.title for o in plan.script_options], ['내 대본'])
+
     def test_video_plan_rejects_segments_outside_their_source(self):
         sources = [{'kind': 'video', 'duration': 3.0}]
         value = {'scenes': [{'photos': [0], 'text': '가.'}], 'segments': [{'source': 0, 'start': 1, 'end': 4}]}

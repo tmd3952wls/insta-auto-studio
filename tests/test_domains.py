@@ -60,7 +60,7 @@ class DomainSchemaTests(unittest.TestCase):
             self.assertIn(name, block)
         self.assertTrue(stay.features.link_collection)
         self.assertFalse(shopping.features.link_collection)
-        self.assertEqual([p.name for _, p in shopping.facts()], ['name', 'memo'])
+        self.assertEqual([p.name for _, p in shopping.facts()], ['name', 'memo', 'script'])
         self.assertEqual(stay.facts(), [])
         self.assertTrue(shopping.disclosure)
         self.assertEqual((stay.media, shopping.media), ('photo', 'video'))

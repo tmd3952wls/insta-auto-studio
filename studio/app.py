@@ -20,7 +20,7 @@ from . import assets, codex, collector, composition, domains, enhance, performan
 from .drama import Drama
 from .fish import Fish
 from .media import badge_image, caption_image, caption_segments, crop_photo, crop_video_frame, preview_image
-from .models import ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, Thumbnail, CreateOptions, CropBox, CropFocus, Job, Storyboard
+from .models import SCRIPT_CHARS, ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, Thumbnail, CreateOptions, CropBox, CropFocus, Job, Storyboard
 from .paths import DATA, RESOURCES, initialize, job_path
 from .pipeline import Pipeline
 
@@ -341,8 +341,9 @@ async def save_facts(job_id: str, value: dict):
     allowed = {prop.name for _, prop in domains.load(job.domain).facts()}
     if not isinstance(value, dict) or set(value) - allowed:
         raise ValueError('이 작업에 저장할 수 없는 정보가 있습니다.')
-    if any(not isinstance(text, str) or len(text.strip()) > 300 for text in value.values()):
-        raise ValueError('입력한 정보는 항목마다 300자 이내로 적어 주세요.')
+    if any(not isinstance(text, str) or len(text.strip()) > (SCRIPT_CHARS if key == 'script' else 300)
+           for key, text in value.items()):
+        raise ValueError(f'입력한 정보는 항목마다 300자, 내 대본은 {SCRIPT_CHARS}자 이내로 적어 주세요.')
     job.facts = {key: text.strip() for key, text in value.items() if text.strip()}
     store.save(job)
     return job.model_dump()

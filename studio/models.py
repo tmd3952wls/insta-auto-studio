@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -18,6 +20,27 @@ MIN_CLIP_SECONDS = 4  # Shortest clip Fish video models accept.
 MAX_CLIP_SECONDS = 15  # Longest clip a Motion may ask for (Motion.seconds).
 MIN_SEGMENT, MAX_SEGMENT = 0.5, 8.0  # Seconds of source video one shot may use.
 MIN_CUT, MAX_CUT = 1.0, 2.0  # Seconds one cut of a video-domain reel stays on screen.
+SYLLABLES_PER_SECOND = 7.5  # Drama3 reading speed measured on the 2026-10-13 shopping reel.
+SCRIPT_CHARS = 600  # Longest user-written script.
+
+
+def script_scenes(text: str) -> list[tuple[str, int]]:
+    """A user's own script as (scene text, segment count): one voice scene per line, a line too short to hold
+    a cut joined to its neighbour, and one segment per ~2 s of speech so every cut stays within MIN_CUT~MAX_CUT."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) == 1:  # One pasted paragraph: a scene per sentence.
+        lines = [part for part in re.split(r'(?<=[.?!])\s+', lines[0]) if part.strip()]
+    seconds = lambda line: sum(char.isalnum() for char in line) / SYLLABLES_PER_SECOND
+    join = lambda first, second: first + (' ' if re.search(r'[,.?!…~]$', first) else ', ') + second
+    scenes = []
+    for line in lines:
+        if scenes and seconds(scenes[-1]) < MIN_CUT + 0.1:
+            scenes[-1] = join(scenes[-1], line)
+        else:
+            scenes.append(line)
+    if len(scenes) > 1 and seconds(scenes[-1]) < MIN_CUT + 0.1:
+        scenes[-2:] = [join(scenes[-2], scenes[-1])]
+    return [(scene, min(3, max(1, math.ceil(seconds(scene) / MAX_CUT)))) for scene in scenes]
 
 
 def plan_clips(order: list[int], total=TARGET_SECONDS) -> list[dict]:

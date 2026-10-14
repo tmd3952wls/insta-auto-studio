@@ -20,6 +20,11 @@
           "source": "user"
         },
         {
+          "name": "script",
+          "label": "내 대본 (선택 · 적으면 AI 대본 대신 이 대본으로 편집)",
+          "source": "user"
+        },
+        {
           "name": "color",
           "label": "색"
         },

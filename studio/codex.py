@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from . import domains
 from .models import (MAX_SEGMENT, MIN_SEGMENT, TARGET_SECONDS, CropBox, Scene, ScriptOption, Segment,
-                     Storyboard, plan_clips)
+                     Storyboard, plan_clips, script_scenes)
 from .paths import DATA, RESOURCES, initialize, job_path
 
 SKILL_FILES = ('SKILL_TEXT.md', 'SKILL_MOTION.md')  # Narration rules, then photo motion rules.
@@ -97,7 +97,7 @@ def skill_text(domain, name):
 def facts_block(job):
     """User-entered schema properties (e.g. product name), quoted as data like the photo labels."""
     domain = domains.load(job.domain)
-    known = [(prop, job.facts.get(prop.name, '').strip()) for _, prop in domain.facts()]
+    known = [(prop, job.facts.get(prop.name, '').strip()) for _, prop in domain.facts() if prop.name != 'script']
     known = {prop.label: value for prop, value in known if value}
     if not known:
         return ''
@@ -147,23 +147,44 @@ async def analyze_video(job):
             images.append(image)
             table.append(f'이미지 {len(images)}: 소스 {index} · {seconds}초')
     lengths = {index: source['duration'] for index, source in sources}
+    own = script_scenes(job.facts.get('script', ''))  # The user's script: only segments are left to choose.
+    if own:
+        table = '\n'.join(f'장면 {n + 1} (구간 {count}개): {json.dumps(text, ensure_ascii=False)}' for n, (text, count) in enumerate(own))
+        writing = f'''사용자가 직접 쓴 대본이 있습니다. 앱이 이 문장을 그대로 읽으므로 글자를 바꾸지 말고, 장면마다 그 문장이 말하는 모습이 보이는 구간을 고르세요.
+구간 수는 아래 표를 따르세요. 편집 규칙에 적힌 전체 구간 수보다 이 표가 우선합니다.
+{table}
+scenes는 위 표와 같은 개수·순서로 쓰고, text에는 표의 문장을 그대로, photos에는 그 장면 구간 번호를 쓰세요.
+script_options에는 title "내 대본"과 texts(표의 문장을 순서대로)로 후보 하나만 쓰세요.'''
+    else:
+        writing = f'''{skill_text(job.domain, 'SKILL_TEXT.md')}'''
     prompt = f'''{domains.schema_block(domain)}
-{skill_text(job.domain, 'SKILL_TEXT.md')}
+{writing}
 
 {skill_text(job.domain, 'SKILL_EDIT.md')}
 소스 영상(번호: 길이 초): {json.dumps(lengths)}
 첨부 이미지는 아래 순서의 프레임입니다:
 {chr(10).join(table)}
 text는 내레이션이며 화면 자막으로도 그대로 표시됩니다. id는 빈 문자열로 반환하세요.
-대본은 '대본 후보 3개' 규칙에 따라 서로 다른 각도로 정확히 {SCRIPT_OPTIONS}개를 script_options에 작성하세요. 장면 묶음(scenes의 photos)은 세 후보가 함께 쓰므로, 각 후보의 texts는 장면 수와 같은 개수로 장면 순서대로 쓰세요.
+{'' if own else '''대본은 '대본 후보 3개' 규칙에 따라 서로 다른 각도로 정확히 {SCRIPT_OPTIONS}개를 script_options에 작성하세요. 장면 묶음(scenes의 photos)은 세 후보가 함께 쓰므로, 각 후보의 texts는 장면 수와 같은 개수로 장면 순서대로 쓰세요.
 scenes의 text에는 첫 번째 후보의 문장을 그대로 넣고 script_choice는 0으로 두세요.
 영상 전체는 약 {TARGET_SECONDS}초입니다. 내레이션 전체를 {TARGET_SECONDS}초 안팎(공백 포함 약 {TARGET_SECONDS * 7}자)에 맞추고, 구간 하나마다 자막 구 1~2개가 걸리게 쓰세요.
 text는 장면마다 공백 포함 150자 이내의 완성된 문장으로 쓰고 마침표나 물음표로 끝내세요. 화면 자막은 쉼표·마침표 단위로 한 구씩 표시되므로 구 사이를 쉼표로 나누세요. 마지막 장면의 마무리(저장·댓글 유도) 문장을 자르지 마세요.
-source_crops는 위 소스마다 정확히 하나씩 쓰세요.
+'''}source_crops는 위 소스마다 정확히 하나씩 쓰세요.
 motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 빈 객체로 반환하세요.
 {facts_block(job)}도구 사용·파일 수정 없이 지정 JSON 스키마 결과만 반환하세요.'''
     result = await run_structured(folder, prompt, images, VideoPlan.model_json_schema(), 'analysis')
-    take_script_options(result)
+    if own:
+        # The words are the user's: keep them exactly and only take the model's segments, grouped by the table.
+        counts = [count for _, count in own]
+        if len(result.get('segments', [])) != sum(counts):
+            raise ValueError('AI가 장면별 구간 수를 맞추지 못했습니다. 다시 분석해 주세요.')
+        starts = [sum(counts[:n]) for n in range(len(counts))]
+        result['scenes'] = [{'id': '', 'photos': list(range(start, start + count)), 'text': text}
+                            for start, (text, count) in zip(starts, own)]
+        result['script_options'] = [{'title': '내 대본', 'texts': [text for text, _ in own]}]
+        result['script_choice'] = 0
+    else:
+        take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
     for segment in result.get('segments', []):  # Keep the model's picks inside the real clip length.
         length = lengths.get(segment.get('source'))
