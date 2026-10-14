@@ -3,6 +3,7 @@
   "label": "숙소",
   "version": "2",
   "order": 10,
+  "disclosure": "광고",
   "object_types": [
     {
       "name": "Accommodation",

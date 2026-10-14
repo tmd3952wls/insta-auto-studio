@@ -80,9 +80,10 @@ def render_revision(job):
     disclosure = domains.load(job.domain).disclosure
     if not domains.load(job.domain).features.narration:
         value['narration'] = False
-    if disclosure:  # Only domains that show one; stay revisions keep their old value.
+    if disclosure:
         value['disclosure'] = disclosure
         value['badge'] = job.options.badge.model_dump()
+        value['disclosure_layout_version'] = 2  # Top-right badge; invalidate older composed previews.
     return stable_hash(value)
 
 

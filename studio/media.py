@@ -66,6 +66,8 @@ def wrap_caption(text: str, font, width=940, outline=8) -> str:
 
 
 def caption_image(text: str, style: CaptionStyle | None = None) -> Image.Image:
+    if not text.strip():
+        return Image.new('RGBA', SIZE)
     style = style or CaptionStyle()
     font = ImageFont.truetype(str(font_path()), style.font_size)
     if len(text.strip().splitlines()) == 2:

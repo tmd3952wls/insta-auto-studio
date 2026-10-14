@@ -35,6 +35,28 @@ class CompositionApiTests(unittest.TestCase):
     def post(self, suffix, value):
         return self.client.post(f'/api/jobs/{self.job.id}/{suffix}', headers=self.headers, json=value)
 
+    def test_silent_storyboard_can_save_empty_middle_and_last_scenes(self):
+        self.job.domain = 'stay-silent'
+        self.job.photo_order = list(range(8))
+        self.job.photos = [{'file': 'p0.jpg', 'sha256': str(i)} for i in range(8)]
+        self.job.narration = {}
+        self.job.storyboard = Storyboard(scenes=[{'photos': [i], 'text': '조용한 객실\n여유로운 하루'} for i in range(8)])
+        store.save(self.job)
+        plan = self.job.storyboard.model_dump()
+        plan['scenes'][3]['text'] = ''
+        plan['scenes'][7]['text'] = ' \n '
+        response = self.post('storyboard', plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        saved = store.read(self.job.id)
+        self.assertEqual(saved.storyboard.scenes[3].text, '')
+        self.assertEqual(saved.storyboard.scenes[7].text, '')
+        self.assertEqual(len(saved.storyboard.scenes), 8)
+
+    def test_narrated_storyboard_still_requires_text(self):
+        plan = self.job.storyboard.model_dump()
+        plan['scenes'][0]['text'] = ''
+        self.assertEqual(self.post('storyboard', plan).status_code, 400)
+
     def test_narration_edit_requires_only_its_voice_and_drops_separate_captions(self):
         plan = self.job.storyboard.model_dump()
         plan['scenes'][0]['caption_text'] = '예전 화면 자막'

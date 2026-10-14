@@ -57,6 +57,16 @@ class AppTests(unittest.TestCase):
             files=[('files',('p.jpg',b'not an image','image/jpeg'))])
         self.assertEqual(response.status_code,400)
 
+    def test_photo_preview_shows_top_right_advertisement_without_captions(self):
+        job = self.upload()
+        response = self.client.post(f'/api/jobs/{job["id"]}/preview', headers=self.headers, json={'text': ''})
+        self.assertEqual(response.status_code, 200)
+        image = Image.open(io.BytesIO(response.content)).convert('RGB')
+        corner = image.crop((820, 60, 1060, 180))
+        self.assertGreater(max(high - low for low, high in corner.getextrema()), 100)
+        opposite = image.crop((20, 60, 260, 180))
+        self.assertLess(max(high - low for low, high in opposite.getextrema()), 10)
+
     def test_performance_endpoint_handles_old_jobs_and_returns_recorded_runs(self):
         from studio import performance
         job = self.upload()

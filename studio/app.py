@@ -640,7 +640,8 @@ async def edit_storyboard(job_id: str, value: dict):
         if domains.load(job.domain).media == 'video':
             plan = Storyboard.validate_video_plan(value, job.photos)
         else:
-            plan = Storyboard.validate_plan(value, len(job.photos), len(job.photos), job.photo_order or list(range(len(job.photos))))
+            plan = Storyboard.validate_plan(value, len(job.photos), len(job.photos), job.photo_order or list(range(len(job.photos))),
+                                            allow_empty_text=job.domain == 'stay-silent')
             if job.domain == 'stay-silent':
                 plan.validate_silent(len(job.photos))
         assets.capture(job)
@@ -652,7 +653,9 @@ async def edit_storyboard(job_id: str, value: dict):
         return job.model_dump()
     if pipeline.busy(job_id) or assets.voice_started(job) or any(v.get('generation_id') or v.get('idempotency_key') for v in job.generated.values()):
         raise ValueError('생성 전에만 대본·움직임을 바꿀 수 있습니다. 새 작업을 만들어 주세요.')
-    job.storyboard = Storyboard.validate_plan(value, len(job.photos), len(job.photos))
+    job.storyboard = Storyboard.validate_plan(value, len(job.photos), len(job.photos), allow_empty_text=job.domain == 'stay-silent')
+    if job.domain == 'stay-silent':
+        job.storyboard.validate_silent(len(job.photos))
     job.quote = job.approval = None
     job.generated = {}
     job.narration = {}
@@ -975,15 +978,18 @@ async def preview(job_id: str, value: dict):
     text = value.get('text', domains.load(job.domain).text('caption_default', '자막'))[:320]
     if job.photos[index].get('kind') == 'video':
         image = await asyncio.to_thread(video_preview, job, index, value, text, caption)
-        data = io.BytesIO()
-        image.save(data, format='JPEG', quality=92)
-        return Response(data.getvalue(), media_type='image/jpeg')
-    focus = next(((item.x, item.y) for item in job.storyboard.crop_focus if item.photo == index),
-                 (0.5, 0.5)) if job.storyboard else (0.5, 0.5)
-    if 'focus' in value:
-        crop = CropFocus.model_validate(dict(value['focus'], photo=index))
-        focus = (crop.x, crop.y)
-    image = await asyncio.to_thread(preview_image, job_path(job_id) / job.photos[index]['file'], text, caption, focus)
+    else:
+        focus = next(((item.x, item.y) for item in job.storyboard.crop_focus if item.photo == index),
+                     (0.5, 0.5)) if job.storyboard else (0.5, 0.5)
+        if 'focus' in value:
+            crop = CropFocus.model_validate(dict(value['focus'], photo=index))
+            focus = (crop.x, crop.y)
+        image = await asyncio.to_thread(preview_image, job_path(job_id) / job.photos[index]['file'], text, caption, focus)
+    disclosure = domains.load(job.domain).disclosure
+    if disclosure:
+        image = image.convert('RGBA')
+        image.alpha_composite(badge_image(disclosure))
+        image = image.convert('RGB')
     data = io.BytesIO()
     image.save(data, format='JPEG', quality=95)
     return Response(data.getvalue(), media_type='image/jpeg')

@@ -36,6 +36,33 @@ class SilentStayTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SilentRenderTests(unittest.TestCase):
+    def test_blank_scenes_keep_two_seconds_without_caption_or_subtitle(self):
+        from studio.render import render, run
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            Image.new('RGB', (360, 640), '#228844').save(folder / 'photo.jpg')
+            job = Job(id='d' * 32, domain='stay-silent', workflow_version=2,
+                      photos=[{'file': 'photo.jpg', 'sha256': str(i)} for i in range(8)],
+                      storyboard=Storyboard(scenes=[{'photos': [i], 'text': '문 열자마자\n프렌치 감성 가득'} for i in range(8)]))
+            for index in (2, 3, 7):
+                job.storyboard.scenes[index].text = ''
+            with patch('studio.render.job_path', return_value=folder):
+                result = render(job)
+            self.assertEqual(result['duration'], 16)
+            report = json.loads((folder / result['verification']).read_text(encoding='utf-8'))
+            self.assertEqual([shot['frames'] for shot in report['timeline']], [60] * 8)
+            blocks = (folder / result['srt']).read_text(encoding='utf-8').strip().split('\n\n')
+            self.assertEqual(len(blocks), 5)
+            self.assertIn('00:00:08,000 --> 00:00:10,000', blocks[2])
+            for index in (2, 3, 7):
+                self.assertFalse(list((folder / 'render').glob(f'caption-{index:03}-*.png')))
+            self.assertTrue((folder / 'render' / 'disclosure.png').is_file())
+            run('-ss', '6.5', '-i', folder / result['file'], '-frames:v', '1', folder / 'blank-frame.png')
+            with Image.open(folder / 'blank-frame.png') as image:
+                corner = image.crop((820, 60, 1060, 180)).convert('RGB')
+                self.assertGreater(max(high - low for low, high in corner.getextrema()), 100)
+
     def test_silent_preview_exports_video_and_subtitles_without_audio(self):
         from studio.render import publish_preview, render, run
         with tempfile.TemporaryDirectory() as directory:

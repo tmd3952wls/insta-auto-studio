@@ -65,7 +65,7 @@ class DomainSchemaTests(unittest.TestCase):
         self.assertTrue(shopping.disclosure)
         self.assertEqual((stay.media, shopping.media), ('photo', 'video'))
         self.assertEqual((shopping.min_media, shopping.max_media), (3, 10))
-        self.assertFalse(stay.disclosure)
+        self.assertTrue(stay.disclosure)
         with self.assertRaises(ValueError):
             domains.load('travel')
 
@@ -150,7 +150,7 @@ class DisclosureRenderTests(unittest.TestCase):
         def corner(key):
             run('-i', folder / result[key], '-frames:v', '1', folder / f'{key}.png')
             with Image.open(folder / f'{key}.png') as image:
-                return max(high - low for low, high in image.crop((880, 30, 1060, 100)).convert('RGB').getextrema())
+                return max(high - low for low, high in image.crop((820, 30, 1060, 180)).convert('RGB').getextrema())
         return corner('file'), corner('video')
 
     def test_shopping_reel_shows_the_disclosure_but_the_clean_video_does_not(self):
@@ -158,15 +158,28 @@ class DisclosureRenderTests(unittest.TestCase):
         self.assertGreater(final, 100)
         self.assertLess(clean, 10)
 
-    def test_stay_reel_has_no_disclosure(self):
-        final, _ = self.render('stay')
-        self.assertLess(final, 10)
+    def test_stay_reel_shows_top_right_advertisement(self):
+        final, clean = self.render('stay')
+        self.assertGreater(final, 100)
+        self.assertLess(clean, 10)
 
-    def test_disclosure_changes_only_shopping_render_revisions(self):
+    def test_disclosure_text_changes_render_revision(self):
         from studio.assets import render_revision
         stay = Job(id='f' * 32)
-        self.assertEqual(render_revision(stay), render_revision(Job(id='f' * 32)))
-        self.assertNotEqual(render_revision(stay), render_revision(Job(id='f' * 32, domain='shopping')))
+        domain = domains.load('stay').model_copy(deep=True)
+        with patch('studio.assets.domains.load', return_value=domain):
+            before = render_revision(stay)
+            domain.disclosure = '다른 광고 표시'
+            self.assertNotEqual(before, render_revision(stay))
+
+    def test_advertisement_badge_stays_in_top_right_safe_margin(self):
+        from studio.media import badge_image
+        # The default spot is the one the user asked for (39 px from the right, 44 px down); it is adjustable per job.
+        left, top, right, bottom = badge_image('광고').getbbox()
+        self.assertGreater(left, 800)
+        self.assertGreaterEqual(top, 40)
+        self.assertLessEqual(right, 1050)
+        self.assertLess(bottom, 180)
 
 
 if __name__ == '__main__':

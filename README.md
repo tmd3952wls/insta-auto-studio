@@ -74,6 +74,13 @@ python scripts/build_windows.py       # dist/StayStudio, dist/StayStudio-Windows
 
 `launch.py --no-browser --port 8766`처럼 브라우저 자동 열기를 끄거나 포트를 바꿀 수 있습니다.
 
+소스로 실행한 개발 서버는 `studio/`의 Python 코드 변경을 감지해 자동으로 다시 불러옵니다.
+화면 파일은 캐시하지 않으므로 기존 링크에서 새로고침하면 최신 화면을 사용합니다.
+이 설정을 처음 적용할 때만 서버를 한 번 다시 실행하면 됩니다.
+영상 생성·수집 작업이 진행 중이면 작업이 끝난 뒤 새 코드를 불러옵니다.
+자동 갱신을 끄려면 `python launch.py --no-reload`로 실행하세요.
+배포용 EXE에서는 자동 재시작을 사용하지 않습니다.
+
 ## 프로젝트 구조
 
 ```

@@ -108,7 +108,7 @@ class Thumbnail(BaseModel):
 class Scene(BaseModel):
     id: str = ''
     photos: list[int] = Field(min_length=1)
-    text: str = Field(min_length=1, max_length=160)  # Narration; the on-screen caption shows the same text.
+    text: str = Field(max_length=160)  # Empty text is allowed for caption-free silent scenes.
 
     @model_validator(mode='after')
     def identity(self):
@@ -218,6 +218,8 @@ class Storyboard(BaseModel):
         if not 8 <= photo_count <= 10 or len(self.scenes) != photo_count or any(len(s.photos) != 1 for s in self.scenes):
             raise ValueError('음성X는 8~10장의 사진에 장면을 하나씩 배치합니다. 대본을 다시 분석해 주세요.')
         def copy(text, last):
+            if not text.strip():
+                return ''
             lines = [line.strip() for line in text.strip().splitlines()]
             if len(lines) != 2 or any(not line or len(line) > 18 for line in lines):
                 raise ValueError('음성X 자막은 줄마다 18자 이하인 두 줄로 작성해 주세요.')
@@ -231,8 +233,10 @@ class Storyboard(BaseModel):
         return self
 
     @classmethod
-    def validate_plan(cls, value, photo_count: int, max_motion: int, expected_order=None):
+    def validate_plan(cls, value, photo_count: int, max_motion: int, expected_order=None, allow_empty_text=False):
         plan = cls.model_validate(value)
+        if not allow_empty_text and any(not scene.text.strip() for scene in plan.scenes):
+            raise ValueError('대본을 입력해 주세요.')
         used = [index for scene in plan.scenes for index in scene.photos]
         if sorted(used) != list(range(photo_count)):
             raise ValueError('모든 사진은 장면에 정확히 한 번씩 포함되어야 합니다.')

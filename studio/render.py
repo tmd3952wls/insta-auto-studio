@@ -294,7 +294,7 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
             raise RuntimeError('선택한 움직임 영상이 아직 없습니다. 생성 작업을 먼저 완료해 주세요.')
     export = folder / 'render'
     export.mkdir(exist_ok=True)
-    # A domain's notice (shopping: the affiliate disclosure) stays on the final reel, never on the clean video.
+    # Keep the advertisement visible throughout the reel, including caption-free scenes.
     disclosure = domains.load(job.domain).disclosure
     badge = export / 'disclosure.png' if disclosure else None
     if badge:
@@ -376,6 +376,8 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
         # a new sentence's first cue waits for its voice, so captions change after the breath, not before it.
         cues = []
         for (begin, finish), line in zip(spans, lines):
+            if not line.strip():
+                continue
             segments = caption_segments(line, job.options.caption) if narrated else [line]
             weights = [max(len(re.sub(r'\W', '', text)), 1) for text in segments]
             boundary = 0
