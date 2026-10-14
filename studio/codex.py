@@ -32,6 +32,7 @@ class VideoPlan(BaseModel):
     script_choice: int
     segments: list[Segment]
     source_crops: list[SourceCrop]
+    product_frames: list[int]  # Image numbers where the product's package, design or name can be made out.
     motion: list[dict]
     crop_focus: list[dict]
     motion_recommendations: list[dict]
@@ -105,6 +106,30 @@ def facts_block(job):
             + json.dumps(known, ensure_ascii=False) + '\n')
 
 
+def avoid_product(segments, flagged, lengths):
+    """Moves each segment off the stretches around frames where the product's package or name shows.
+    `flagged` holds (source, seconds, spacing of that source's sample frames)."""
+    for segment in segments:
+        source = segment['source']
+        blocked = sorted((t - gap / 2 - 0.1, t + gap / 2 + 0.1) for s, t, gap in flagged if s == source)
+        if all(segment['end'] <= low or segment['start'] >= high for low, high in blocked):
+            continue
+        free, cursor = [], 0.0
+        for low, high in blocked:
+            if low > cursor:
+                free.append((cursor, low))
+            cursor = max(cursor, high)
+        free.append((cursor, lengths[source]))
+        length = segment['end'] - segment['start']
+        fits = [(low, high) for low, high in free if high - low >= min(length, MIN_SEGMENT * 2)]
+        if not fits:
+            raise ValueError(f'{source + 1}번 영상은 제품이 보이지 않는 부분이 거의 없습니다. 이 영상을 빼거나 다른 영상을 넣어 주세요.')
+        low, high = min(fits, key=lambda f: abs(min(max(segment['start'], f[0]), f[1]) - segment['start']))
+        length = min(length, high - low)
+        start = min(max(segment['start'], low), high - length)
+        segment['start'], segment['end'] = round(start, 2), round(start + length, 2)
+
+
 def take_script_options(result):
     """Keeps exactly SCRIPT_OPTIONS candidates and starts the scenes on the first one."""
     options = result.get('script_options') or []
@@ -130,7 +155,7 @@ def frame_times(duration):
 
 async def analyze_video(job):
     """Video domains: script candidates, subtitle-hiding crops and script-matched segments from source frames."""
-    from .render import video_frame
+    from .render import shot_cuts, video_frame
     folder = job_path(job.id)
     domain = domains.load(job.domain)
     sources = [(index, photo) for index, photo in enumerate(job.photos) if photo.get('kind') == 'video']
@@ -138,7 +163,7 @@ async def analyze_video(job):
         raise ValueError(f'영상은 최소 {domain.min_media}개 이상 넣어 주세요. 현재 {len(sources)}개입니다.')
     frames_dir = folder / 'analysis-frames'
     frames_dir.mkdir(exist_ok=True)
-    images, table = [], []
+    images, table, sampled = [], [], []  # sampled: (source, seconds, frame spacing) per image.
     for index, source in sources:
         for seconds in frame_times(source['duration']):
             image = frames_dir / f'source-{index:03}-{seconds:05.1f}s.jpg'
@@ -146,13 +171,17 @@ async def analyze_video(job):
                 await asyncio.to_thread(video_frame, folder / source['file'], seconds, image, 576)
             images.append(image)
             table.append(f'이미지 {len(images)}: 소스 {index} · {seconds}초')
+            sampled.append((index, seconds, source['duration'] / len(frame_times(source['duration']))))
+        cuts = await asyncio.to_thread(shot_cuts, folder / source['file'])
+        if cuts:
+            table.append(f'소스 {index}의 장면 전환(초): {", ".join(f"{cut:.1f}" for cut in cuts)}')
     lengths = {index: source['duration'] for index, source in sources}
     own = script_scenes(job.facts.get('script', ''))  # The user's script: only segments are left to choose.
     if own:
-        table = '\n'.join(f'장면 {n + 1} (구간 {count}개): {json.dumps(text, ensure_ascii=False)}' for n, (text, count) in enumerate(own))
+        scene_table = '\n'.join(f'장면 {n + 1} (구간 {count}개): {json.dumps(text, ensure_ascii=False)}' for n, (text, count) in enumerate(own))
         writing = f'''사용자가 직접 쓴 대본이 있습니다. 앱이 이 문장을 그대로 읽으므로 글자를 바꾸지 말고, 장면마다 그 문장이 말하는 모습이 보이는 구간을 고르세요.
 구간 수는 아래 표를 따르세요. 편집 규칙에 적힌 전체 구간 수보다 이 표가 우선합니다.
-{table}
+{scene_table}
 scenes는 위 표와 같은 개수·순서로 쓰고, text에는 표의 문장을 그대로, photos에는 그 장면 구간 번호를 쓰세요.
 script_options에는 title "내 대본"과 texts(표의 문장을 순서대로)로 후보 하나만 쓰세요.'''
     else:
@@ -170,6 +199,8 @@ scenes의 text에는 첫 번째 후보의 문장을 그대로 넣고 script_choi
 영상 전체는 약 {TARGET_SECONDS}초입니다. 내레이션 전체를 {TARGET_SECONDS}초 안팎(공백 포함 약 {TARGET_SECONDS * 7}자)에 맞추고, 구간 하나마다 자막 구 1~2개가 걸리게 쓰세요.
 text는 장면마다 공백 포함 150자 이내의 완성된 문장으로 쓰고 마침표나 물음표로 끝내세요. 화면 자막은 쉼표·마침표 단위로 한 구씩 표시되므로 구 사이를 쉼표로 나누세요. 마지막 장면의 마무리(저장·댓글 유도) 문장을 자르지 마세요.
 '''}source_crops는 위 소스마다 정확히 하나씩 쓰세요.
+product_frames에는 제품 용기·포장 디자인이나 제품명·상표 글자가 알아볼 수 있게 보이는 이미지 번호를 빠짐없이 쓰세요. 없으면 빈 배열입니다.
+구간 하나는 '장면 전환' 시각을 넘지 않게 한 장면 안에서 고르세요.
 motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 빈 객체로 반환하세요.
 {facts_block(job)}도구 사용·파일 수정 없이 지정 JSON 스키마 결과만 반환하세요.'''
     result = await run_structured(folder, prompt, images, VideoPlan.model_json_schema(), 'analysis')
@@ -186,6 +217,7 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
     else:
         take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
+    flagged = [sampled[number - 1] for number in result.pop('product_frames', []) if 0 < number <= len(sampled)]
     for segment in result.get('segments', []):  # Keep the model's picks inside the real clip length.
         length = lengths.get(segment.get('source'))
         if length:
@@ -193,6 +225,7 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
             segment['start'] = round(max(0, min(segment.get('start', 0), segment['end'] - MIN_SEGMENT)), 2)
             if segment['end'] - segment['start'] > MAX_SEGMENT:
                 segment['end'] = round(segment['start'] + MAX_SEGMENT, 2)
+    avoid_product(result.get('segments', []), flagged, lengths)  # The product must stay a mystery.
     result.update(motion=[], crop_focus=[], motion_recommendations=[], selection_reasons={})
     plan = Storyboard.validate_video_plan(result, job.photos)
     plan.provenance = domains.record(domain, [domains.schema_block(domain), skill_text(job.domain, 'SKILL_TEXT.md'),

@@ -159,6 +159,35 @@ def thumbnail_images(job, folder, choice=None, badge=None):
     return still.convert('RGB'), titled.convert('RGB')
 
 
+SHOT_SCORE = 0.25  # Scene-change score that marks a hard cut inside an uploaded source video.
+
+
+def shot_cuts(path):
+    """Seconds of the hard cuts inside a source video, cached next to it (compilation clips cut every few seconds)."""
+    cache = path.with_name(path.name + '.cuts.json')
+    if cache.is_file():
+        return json.loads(cache.read_text(encoding='utf-8'))
+    process = subprocess.run([ffmpeg(), '-hide_banner', '-i', str(path), '-an', '-vf',
+        f"scale=160:-2,select='gt(scene,{SHOT_SCORE})',metadata=print:key=lavfi.scene_score", '-f', 'null', '-'],
+        capture_output=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    cuts = [round(float(t), 3) for t in re.findall(r'pts_time:([\d.]+)', process.stderr.decode('utf-8', 'replace'))]
+    cache.write_text(json.dumps(cuts), encoding='utf-8')
+    return cuts
+
+
+def fit_segment(start, end, needed, cuts, duration, guard=0.05):
+    """A `needed`-second window from the chosen span that stays inside one shot of the source, so a cut never
+    flashes past for a few frames. A shot shorter than `needed` is used whole (the caller slows it down)."""
+    edges = [0.0, *[cut for cut in cuts if 0 < cut < duration], duration]
+    shots = list(zip(edges, edges[1:]))
+    low, high = max(shots, key=lambda shot: min(end, shot[1]) - max(start, shot[0]))
+    low, high = (low + guard if low > 0 else low), (high - guard if high < duration else high)
+    if high - low <= needed:
+        return low, high
+    begin = min(max(start, low), high - needed)
+    return begin, begin + needed
+
+
 def crop_filter(crop):
     """ffmpeg filter that zooms a source into 1080x1920; same geometry as media.crop_video_frame."""
     zoom, x, y = crop.get('zoom', 1.0), crop.get('x', 0.5), crop.get('y', 0.5)
@@ -285,9 +314,11 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
         for photo, (start, end) in zip(motion.photos, shot_bounds(source, len(motion.photos))):
             shots[photo] = (source, start, end)
     fill = {}  # shot -> filter zooming it into 1080x1920; generated clips are just center-cropped.
+    durations = {}  # Video domains: segment -> length of its source, for keeping it inside one shot.
     for index, segment in enumerate(job.storyboard.segments):  # Video domains: scenes index these segments.
         item = job.photos[segment.source]
         shots[index] = (folder / item['file'], segment.start, segment.end)
+        durations[index] = item.get('duration') or video_info(folder / item['file'])[2]
         fill[index] = crop_filter(item.get('crop', {}))
     narrated = domains.load(job.domain).features.narration
     longest = MAX_CUT if job.storyboard.segments else None  # Video domains keep every cut within MAX_CUT.
@@ -371,6 +402,8 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
             clean_clip = export / f'clean-{len(clips):03}.mp4'
             if is_moving:
                 source, start, end = shots[photo_index]
+                if photo_index in durations:  # Play the slot at natural speed from a single shot of the source.
+                    start, end = fit_segment(start, end, count / 30, shot_cuts(source), durations[photo_index])
                 inputs = ['-i', source]
                 # Stretch or trim the photo's shot to its slot (at most 2x slow motion, then hold the last frame),
                 # upscale 720p-class clips to 1080×1920 and split long shots into punch-in cuts.

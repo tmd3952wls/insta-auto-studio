@@ -184,12 +184,33 @@ class VideoAnalysisTests(unittest.TestCase):
                 plan = asyncio.run(codex.analyze_video(job))
         self.assertIn('장면 1 (구간 2개): "저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요."', seen['prompt'])
         self.assertNotIn('대본 후보 3개', seen['prompt'])
+        self.assertIn('이미지 1: 소스 0 · 0.5초', seen['prompt'])  # The frame table survives the scene table.
         self.assertNotIn('바보냐고"', seen['prompt'].split('사용자가 입력한')[-1])  # The script is not repeated as a fact.
         # "바보냐고" is too short for a cut of its own, so it joins the next line.
         self.assertEqual([(s.text, s.photos) for s in plan.scenes],
                          [('저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요.', [0, 1]),
                           ('바보냐고, 수세미로 아무리 밀어도 안 지워지더라고요.', [2, 3])])
         self.assertEqual([o.title for o in plan.script_options], ['내 대본'])
+
+    def test_segments_move_off_frames_that_show_the_product(self):
+        segments = [{'source': 0, 'start': 2.0, 'end': 3.5}, {'source': 1, 'start': 0.0, 'end': 1.5}]
+        codex.avoid_product(segments, [(0, 2.5, 1.0), (0, 3.5, 1.0)], {0: 8.0, 1: 4.0})
+        self.assertEqual(segments[0], {'source': 0, 'start': 0.4, 'end': 1.9})  # The nearest clear stretch, before 1.9 s.
+        self.assertEqual(segments[1], {'source': 1, 'start': 0.0, 'end': 1.5})  # Other sources are untouched.
+        with self.assertRaisesRegex(ValueError, '1번 영상은 제품이'):
+            codex.avoid_product([{'source': 0, 'start': 0.0, 'end': 1.5}], [(0, t + 0.5, 1.0) for t in range(4)], {0: 4.0})
+
+    def test_a_slot_plays_from_one_shot_of_its_source(self):
+        from studio.render import fit_segment
+        # A cut at 43.2 s inside the chosen 43.0~44.4 s would flash the old shot for 0.2 s: start after it instead.
+        self.assertEqual(fit_segment(43.0, 44.4, 1.3, [7.4, 43.2], 46.6), (43.25, 44.55))
+        low, high = fit_segment(10.5, 11.9, 1.1, [5.27, 11.37, 18.17], 35.9)  # Most of it is before the cut: stay there.
+        self.assertAlmostEqual(low, 10.22)
+        self.assertAlmostEqual(high, 11.32)
+        self.assertEqual(fit_segment(2.0, 3.0, 1.0, [], 8.0), (2.0, 3.0))
+        low, high = fit_segment(1.0, 2.0, 1.5, [0.8, 2.0], 5.0)  # The shot is too short: use it whole.
+        self.assertAlmostEqual(low, 0.85)
+        self.assertAlmostEqual(high, 1.95)
 
     def test_video_plan_rejects_segments_outside_their_source(self):
         sources = [{'kind': 'video', 'duration': 3.0}]
