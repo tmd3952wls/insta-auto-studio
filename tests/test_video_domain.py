@@ -207,6 +207,23 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertEqual(segments[0], {'source': 1, 'start': 11.9, 'end': 13.1, 'words': '반짝거려요'})  # Centred on 12.5 s.
         self.assertEqual(segments[1], {'source': 0, 'start': 0.0, 'end': 2.0, 'words': '신발이'})  # 4 s capped at 2 s, inside its shot.
 
+    def test_a_re_cropped_copy_of_a_clip_is_recognised_as_the_same_footage(self):
+        original, copy = (40.94, [2.1, 6.4, 10.9]), (40.9, [2.12, 6.38, 10.95])
+        self.assertTrue(codex.same_footage(original, copy))
+        self.assertFalse(codex.same_footage(original, (40.9, [3.0, 8.0, 12.0])))
+        self.assertFalse(codex.same_footage((26.2, []), (29.9, [])))
+
+    def test_no_shot_is_used_twice_and_short_shots_give_way(self):
+        sampled = [(0, 6.4, 1, 5.8, 7.0), (0, 2.5, 1, 0.0, 5.8), (1, 4.0, 1, 2.1, 6.4), (1, 9.0, 1, 6.4, 10.9)]
+        segments = [{'source': 0, 'start': 0, 'end': 1.2, 'image': 1, 'words': '저 잔머리 때문에 남편이랑 다퉜어요'},
+                    {'source': 1, 'start': 0, 'end': 1.2, 'image': 3, 'words': '묶었다는데'},
+                    {'source': 1, 'start': 0, 'end': 1.2, 'image': 3, 'words': '뒤에 잔머리가'}]
+        codex.place_segments(segments, sampled, {0: 26.2, 1: 40.9})
+        self.assertEqual(segments[0]['source'], 0)
+        self.assertLessEqual(segments[0]['end'], 5.8)  # The 1.2 s shot is too short for 2 s of words: the 5.8 s one is used.
+        self.assertEqual((segments[1]['start'], segments[2]['source']), (3.4, 1))
+        self.assertGreaterEqual(segments[2]['start'], 6.4)  # The repeated pick moves to the next unused shot.
+
     def test_cuts_follow_the_words_they_show(self):
         from studio.media import allocate_words
         counts = allocate_words(3.0, ['신발이', '반짝반짝 빛나요'])

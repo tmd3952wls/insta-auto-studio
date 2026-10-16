@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from . import domains
-from .models import (MAX_CUT, MAX_SEGMENT, MIN_CUT, MIN_SEGMENT, TARGET_SECONDS, CropBox, Scene, ScriptOption, Segment,
+from .models import (MAX_CUT, MAX_SEGMENT, MIN_CUT, MIN_SEGMENT, SYLLABLES_PER_SECOND, TARGET_SECONDS, CropBox, Scene, ScriptOption, Segment,
                      Storyboard, plan_clips, script_scenes)
 from .paths import DATA, RESOURCES, initialize, job_path
 
@@ -169,13 +169,39 @@ def frame_times(duration, cuts=(), limit=8):
     return picks
 
 
+def same_footage(first, second):
+    """Whether two uploads are the same clip (e.g. an original and a re-cropped copy): equal length and the same
+    hard cuts, which survive cropping and re-encoding where pixels do not."""
+    (length, cuts), (other_length, other_cuts) = first, second
+    if abs(length - other_length) > 0.2:
+        return False
+    if not cuts and not other_cuts:
+        return abs(length - other_length) < 0.05
+    matched = sum(any(abs(cut - other) < 0.15 for other in other_cuts) for cut in cuts)
+    return matched >= 0.8 * max(len(cuts), len(other_cuts))
+
+
+def spoken_seconds(words):
+    return max(MIN_CUT, sum(char.isalnum() for char in words) / SYLLABLES_PER_SECOND)
+
+
 def place_segments(segments, sampled, lengths):
-    """Moves each segment onto the shot of the frame the model said shows its words, centred on that frame."""
+    """Moves each segment onto the shot of the frame the model said shows its words, centred on that frame.
+    No shot is used twice, and a shot too short for its words gives way to the nearest long-enough unused shot of
+    the same clip: stretching a short shot makes it stutter, repeating one makes the reel feel looped."""
+    used = set()
     for segment in segments:
         number = segment.pop('image', 0)
         if not 0 < number <= len(sampled):
             continue
         source, seconds, _, low, high = sampled[number - 1]
+        need = spoken_seconds(segment.get('words', '')) * 0.9
+        if (source, low) in used or high - low < need:
+            spare = [item for item in sampled if item[0] == source and (item[0], item[3]) not in used]
+            fits = [item for item in spare if item[4] - item[3] >= need] or spare
+            if fits:
+                source, seconds, _, low, high = min(fits, key=lambda item: abs(item[1] - seconds))
+        used.add((source, low))
         length = min(max(segment.get('end', 0) - segment.get('start', 0), MIN_CUT), MAX_CUT)
         if high - low < length:  # A very short shot: take what it has, stretched by the renderer.
             low, high = max(0.0, min(low, lengths[source] - MIN_SEGMENT)), max(high, min(low + MIN_SEGMENT, lengths[source]))
@@ -195,9 +221,20 @@ async def analyze_video(job):
     frames_dir = folder / 'analysis-frames'
     frames_dir.mkdir(exist_ok=True)
     images, table, sampled = [], [], []  # sampled: (source, seconds, frame spacing, shot start, shot end) per image.
-    limit = max(4, FRAME_BUDGET // len(sources))
-    for index, source in sources:
-        cuts = await asyncio.to_thread(shot_cuts, folder / source['file'])
+    clips = {index: (source['duration'], await asyncio.to_thread(shot_cuts, folder / source['file'])) for index, source in sources}
+    copies = {}  # Uploads that repeat another clip: only one of them is shown, so the same footage cannot appear twice.
+    for position, (index, source) in enumerate(sources):
+        kept = next((other for other, _ in sources[:position] if other not in copies and same_footage(clips[index], clips[other])), None)
+        if kept is not None:
+            # Keep the copy the user prepared (subtitles erased or re-cropped), else the earlier upload.
+            prepared = any(mark in source['name'].lower() for mark in ('vmake', 'crop', 'clean'))
+            copies[kept if prepared else index] = index if prepared else kept
+    for duplicate, original in copies.items():
+        table.append(f'소스 {duplicate}는 소스 {original}와 같은 영상이라 소스 {original}만 보여 줍니다. 소스 {duplicate}는 쓰지 마세요.')
+    shown = [(index, source) for index, source in sources if index not in copies]
+    limit = max(4, FRAME_BUDGET // len(shown))
+    for index, source in shown:
+        cuts = clips[index][1]
         picks = frame_times(source['duration'], cuts, limit)
         for seconds, low, high in picks:
             image = frames_dir / f'source-{index:03}-{seconds:05.1f}s.jpg'

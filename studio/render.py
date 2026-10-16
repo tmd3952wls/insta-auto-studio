@@ -421,12 +421,16 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
                 # Stretch or trim the photo's shot to its slot (at most 2x slow motion, then hold the last frame),
                 # upscale 720p-class clips to 1080×1920 and split long shots into punch-in cuts.
                 speed = min(max(count / 30 / max(end - start, 0.1), 0.5), 2.0)
+                punch = (f"zoompan=z='{cut_zoom(count, longest=longest) if narrated else '1.0'}':"
+                         "x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1920:fps=30,setsar=1")
                 base = (f'trim=start={start:.3f}:end={end:.3f},setpts=(PTS-STARTPTS)*{speed:.4f},'
                         f"{fill.get(photo_index, 'scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920')},fps=30,"
-                        f'tpad=stop_mode=clone:stop_duration={count/30+1},'
-                        f"zoompan=z='{cut_zoom(count, longest=longest) if narrated else '1.0'}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1920:fps=30,setsar=1")
+                        f'tpad=stop_mode=clone:stop_duration={count/30+1},' + punch)
                 if job.domain == 'stay':
                     base = motion_filter(start, end, count, source_rates[source], fill.get(photo_index))
+                elif photo_index in durations and speed > 1.08:
+                    # A shot shorter than its slot: interpolate new frames instead of repeating them, which stutters.
+                    base = motion_filter(start, end, count, video_frame_rate(source), fill.get(photo_index)) + ',' + punch
             else:
                 source = export / f'photo-{photo_index:03}.jpg'
                 crop_photo(folder / job.photos[photo_index]['file'], *focus.get(photo_index, (0.5, 0.5))).save(source, quality=96)
