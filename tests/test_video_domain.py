@@ -153,10 +153,10 @@ class VideoAnalysisTests(unittest.TestCase):
                 plan = asyncio.run(codex.analyze_video(job))
             prompt = seen['prompt']
             self.assertTrue(prompt.startswith('<ontology-schema domain="shopping" version='))
-            for phrase in SHOPPING_EXAMPLES + ('썰 공식', '상품 영상 편집', '이미지 1: 소스 0 · 0.5초', '"상품명": "얼룩 제거 스프레이"'):
+            for phrase in SHOPPING_EXAMPLES + ('썰 공식', '상품 영상 편집', '이미지 1: 소스 0 · 1.5초 (장면 0.0~3.0초)', '"상품명": "얼룩 제거 스프레이"'):
                 self.assertIn(phrase, prompt)
             self.assertNotIn('숙소', prompt)
-            self.assertEqual(len(seen['images']), 3 + 4 + 5)  # One frame per second for short clips.
+            self.assertEqual(len(seen['images']), 1 + 2 + 2)  # One frame per ~3 s of each single-shot clip.
             self.assertIn('source_crops', seen['schema']['properties'])
         self.assertEqual([s.text for s in plan.scenes], ['후보0 처음.', '후보0 끝.'])
         self.assertEqual(plan.script_choice, 0)
@@ -184,13 +184,33 @@ class VideoAnalysisTests(unittest.TestCase):
                 plan = asyncio.run(codex.analyze_video(job))
         self.assertIn('장면 1 (구간 2개): "저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요."', seen['prompt'])
         self.assertNotIn('대본 후보 3개', seen['prompt'])
-        self.assertIn('이미지 1: 소스 0 · 0.5초', seen['prompt'])  # The frame table survives the scene table.
+        self.assertIn('이미지 1: 소스 0 · 1.5초', seen['prompt'])  # The frame table survives the scene table.
         self.assertNotIn('바보냐고"', seen['prompt'].split('사용자가 입력한')[-1])  # The script is not repeated as a fact.
         # "바보냐고" is too short for a cut of its own, so it joins the next line.
         self.assertEqual([(s.text, s.photos) for s in plan.scenes],
                          [('저 이거 몰라서 집주인한테 보증금 떼일 뻔했어요.', [0, 1]),
                           ('바보냐고, 수세미로 아무리 밀어도 안 지워지더라고요.', [2, 3])])
         self.assertEqual([o.title for o in plan.script_options], ['내 대본'])
+
+    def test_frames_follow_the_shots_of_a_compilation_clip(self):
+        # A frame per shot (more for long ones), so each phrase can be matched to a shot that shows it.
+        picks = codex.frame_times(16.0, [2.0, 9.0])
+        self.assertEqual([p[1:] for p in picks], [(0.0, 2.0), (2.0, 9.0), (2.0, 9.0), (2.0, 9.0), (9.0, 16.0), (9.0, 16.0), (9.0, 16.0)])
+        self.assertEqual(len(codex.frame_times(60.0, [], limit=4)), 4)  # Thinned evenly to the frame budget.
+
+    def test_each_segment_is_cut_from_the_shot_its_words_point_to(self):
+        sampled = [(0, 1.0, 1.0, 0.0, 2.0), (1, 12.5, 2.3, 9.0, 16.0)]
+        segments = [{'source': 0, 'start': 5.0, 'end': 6.2, 'image': 2, 'words': '반짝거려요'},
+                    {'source': 1, 'start': 0.0, 'end': 4.0, 'image': 1, 'words': '신발이'}]
+        codex.place_segments(segments, sampled, {0: 3.0, 1: 16.0})
+        self.assertEqual(segments[0], {'source': 1, 'start': 11.9, 'end': 13.1, 'words': '반짝거려요'})  # Centred on 12.5 s.
+        self.assertEqual(segments[1], {'source': 0, 'start': 0.0, 'end': 2.0, 'words': '신발이'})  # 4 s capped at 2 s, inside its shot.
+
+    def test_cuts_follow_the_words_they_show(self):
+        from studio.media import allocate_words
+        counts = allocate_words(3.0, ['신발이', '반짝반짝 빛나요'])
+        self.assertEqual(sum(counts), 90)
+        self.assertEqual(counts, [39, 51])  # 1 s each, then the other 30 frames split 3:7 by spoken length.
 
     def test_segments_move_off_frames_that_show_the_product(self):
         segments = [{'source': 0, 'start': 2.0, 'end': 3.5}, {'source': 1, 'start': 0.0, 'end': 1.5}]

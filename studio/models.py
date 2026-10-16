@@ -157,6 +157,7 @@ class Segment(BaseModel):
     source: int = Field(ge=0)
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+    words: str = Field('', max_length=80)  # The part of the scene's narration heard while this segment shows.
 
     @model_validator(mode='after')
     def span(self):

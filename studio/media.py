@@ -167,6 +167,19 @@ def allocate_frames(audio_seconds: float, motion_flags: list[bool], fps=30) -> l
     return counts
 
 
+def allocate_words(audio_seconds: float, texts: list[str], fps=30, least=30) -> list[int]:
+    """Frames per segment in proportion to the words heard over it, so a cut changes when its words start;
+    each gets at least `least` frames while the scene is long enough."""
+    total = max(math.ceil(audio_seconds * fps), len(texts) * 9)
+    floor = least if total >= least * len(texts) else total // len(texts)
+    weights = [max(sum(char.isalnum() for char in text), 1) for text in texts]
+    raw = [(total - floor * len(texts)) * weight / sum(weights) for weight in weights]
+    counts = [floor + math.floor(value) for value in raw]
+    for index in sorted(range(len(raw)), key=lambda i: raw[i] % 1, reverse=True)[:total - sum(counts)]:
+        counts[index] += 1
+    return counts
+
+
 def motion_cuts(frames: int, fps=30, longest=None) -> list[int]:
     """Start frames of the cuts one photo's shot is split into: two once it lasts SPLIT_SECONDS, else one.
     With `longest` (video domains) a shot is split only as often as needed to keep every cut within that many seconds."""

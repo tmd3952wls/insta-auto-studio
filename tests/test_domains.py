@@ -64,7 +64,7 @@ class DomainSchemaTests(unittest.TestCase):
         self.assertEqual(stay.facts(), [])
         self.assertTrue(shopping.disclosure)
         self.assertEqual((stay.media, shopping.media), ('photo', 'video'))
-        self.assertEqual((shopping.min_media, shopping.max_media), (3, 10))
+        self.assertEqual((shopping.min_media, shopping.max_media), (3, 15))
         self.assertTrue(stay.disclosure)
         with self.assertRaises(ValueError):
             domains.load('travel')

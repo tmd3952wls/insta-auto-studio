@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import shutil
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from . import domains
-from .models import (MAX_SEGMENT, MIN_SEGMENT, TARGET_SECONDS, CropBox, Scene, ScriptOption, Segment,
+from .models import (MAX_CUT, MAX_SEGMENT, MIN_CUT, MIN_SEGMENT, TARGET_SECONDS, CropBox, Scene, ScriptOption, Segment,
                      Storyboard, plan_clips, script_scenes)
 from .paths import DATA, RESOURCES, initialize, job_path
 
@@ -25,12 +26,17 @@ class SourceCrop(BaseModel):
     reason: str
 
 
+class PickedSegment(Segment):
+    """A segment as the model returns it: `image` is the attached frame that shows what `words` say."""
+    image: int
+
+
 class VideoPlan(BaseModel):
     """What Codex returns for a video domain: Storyboard fields plus a crop per source video."""
     scenes: list[Scene]
     script_options: list[ScriptOption]
     script_choice: int
-    segments: list[Segment]
+    segments: list[PickedSegment]
     source_crops: list[SourceCrop]
     product_frames: list[int]  # Image numbers where the product's package, design or name can be made out.
     motion: list[dict]
@@ -144,13 +150,36 @@ def take_script_options(result):
         scene.update(text=text, id='')
 
 
-FRAMES_PER_SOURCE = 8
+FRAME_BUDGET = 96  # Frames attached to one analysis, shared by all sources.
+SHOT_SPACING = 3.0  # A long shot gets a frame about every this many seconds.
 
 
-def frame_times(duration):
-    """Up to FRAMES_PER_SOURCE sample times: every second for short clips, evenly spread for longer ones."""
-    count = min(FRAMES_PER_SOURCE, max(1, int(duration)))
-    return [round((index + 0.5) * duration / count, 1) for index in range(count)]
+def frame_times(duration, cuts=(), limit=8):
+    """(seconds, shot start, shot end) to look at: the middle of every hard-cut shot, more frames for long shots,
+    thinned evenly to `limit`. One frame per shot lets each phrase be matched to a shot that really shows it."""
+    edges = [0.0, *[cut for cut in cuts if 0 < cut < duration], duration]
+    picks = []
+    for low, high in zip(edges, edges[1:]):
+        count = max(1, math.ceil((high - low) / SHOT_SPACING))
+        picks += [(round(low + (high - low) * (n + 0.5) / count, 1), low, high) for n in range(count)]
+    if len(picks) > limit:
+        picks = [picks[round(n * (len(picks) - 1) / max(limit - 1, 1))] for n in range(limit)]
+    return picks
+
+
+def place_segments(segments, sampled, lengths):
+    """Moves each segment onto the shot of the frame the model said shows its words, centred on that frame."""
+    for segment in segments:
+        number = segment.pop('image', 0)
+        if not 0 < number <= len(sampled):
+            continue
+        source, seconds, _, low, high = sampled[number - 1]
+        length = min(max(segment.get('end', 0) - segment.get('start', 0), MIN_CUT), MAX_CUT)
+        if high - low < length:  # A very short shot: take what it has, stretched by the renderer.
+            low, high = max(0.0, min(low, lengths[source] - MIN_SEGMENT)), max(high, min(low + MIN_SEGMENT, lengths[source]))
+            length = high - low
+        start = min(max(seconds - length / 2, low), high - length)
+        segment.update(source=source, start=round(start, 2), end=round(start + length, 2))
 
 
 async def analyze_video(job):
@@ -163,18 +192,18 @@ async def analyze_video(job):
         raise ValueError(f'영상은 최소 {domain.min_media}개 이상 넣어 주세요. 현재 {len(sources)}개입니다.')
     frames_dir = folder / 'analysis-frames'
     frames_dir.mkdir(exist_ok=True)
-    images, table, sampled = [], [], []  # sampled: (source, seconds, frame spacing) per image.
+    images, table, sampled = [], [], []  # sampled: (source, seconds, frame spacing, shot start, shot end) per image.
+    limit = max(4, FRAME_BUDGET // len(sources))
     for index, source in sources:
-        for seconds in frame_times(source['duration']):
+        cuts = await asyncio.to_thread(shot_cuts, folder / source['file'])
+        picks = frame_times(source['duration'], cuts, limit)
+        for seconds, low, high in picks:
             image = frames_dir / f'source-{index:03}-{seconds:05.1f}s.jpg'
             if not image.is_file():
                 await asyncio.to_thread(video_frame, folder / source['file'], seconds, image, 576)
             images.append(image)
-            table.append(f'이미지 {len(images)}: 소스 {index} · {seconds}초')
-            sampled.append((index, seconds, source['duration'] / len(frame_times(source['duration']))))
-        cuts = await asyncio.to_thread(shot_cuts, folder / source['file'])
-        if cuts:
-            table.append(f'소스 {index}의 장면 전환(초): {", ".join(f"{cut:.1f}" for cut in cuts)}')
+            table.append(f'이미지 {len(images)}: 소스 {index} · {seconds}초 (장면 {low:.1f}~{high:.1f}초)')
+            sampled.append((index, seconds, source['duration'] / len(picks), low, high))
     lengths = {index: source['duration'] for index, source in sources}
     own = script_scenes(job.facts.get('script', ''))  # The user's script: only segments are left to choose.
     if own:
@@ -200,7 +229,7 @@ scenes의 text에는 첫 번째 후보의 문장을 그대로 넣고 script_choi
 text는 장면마다 공백 포함 150자 이내의 완성된 문장으로 쓰고 마침표나 물음표로 끝내세요. 화면 자막은 쉼표·마침표 단위로 한 구씩 표시되므로 구 사이를 쉼표로 나누세요. 마지막 장면의 마무리(저장·댓글 유도) 문장을 자르지 마세요.
 '''}source_crops는 위 소스마다 정확히 하나씩 쓰세요.
 product_frames에는 제품 용기·포장 디자인이나 제품명·상표 글자가 알아볼 수 있게 보이는 이미지 번호를 빠짐없이 쓰세요. 없으면 빈 배열입니다.
-구간 하나는 '장면 전환' 시각을 넘지 않게 한 장면 안에서 고르세요.
+구간마다 image에는 그 구간의 말(words)이 가리키는 모습이 실제로 보이는 이미지 번호를, words에는 그 구간이 나오는 동안 들리는 장면 문장의 한 부분을 쓰세요. 한 장면의 words를 순서대로 이어 붙이면 그 장면 문장이 되어야 합니다. 앱은 image가 속한 장면(괄호 안 시간) 안에서 구간을 잘라 씁니다.
 motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 빈 객체로 반환하세요.
 {facts_block(job)}도구 사용·파일 수정 없이 지정 JSON 스키마 결과만 반환하세요.'''
     result = await run_structured(folder, prompt, images, VideoPlan.model_json_schema(), 'analysis')
@@ -217,7 +246,8 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
     else:
         take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
-    flagged = [sampled[number - 1] for number in result.pop('product_frames', []) if 0 < number <= len(sampled)]
+    flagged = [sampled[number - 1][:3] for number in result.pop('product_frames', []) if 0 < number <= len(sampled)]
+    place_segments(result.get('segments', []), sampled, lengths)
     for segment in result.get('segments', []):  # Keep the model's picks inside the real clip length.
         length = lengths.get(segment.get('source'))
         if length:

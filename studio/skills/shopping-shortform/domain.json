@@ -102,7 +102,7 @@
   },
   "ui": {
     "intro": "상품 영상을 넣고, 나만의 대본과 자막을 더하세요.",
-    "upload_title": "상품 영상 5~6개를 여기에 넣어 주세요",
+    "upload_title": "상품 영상 5~15개를 여기에 넣어 주세요",
     "caption_default": "저 이거 몰라서 혼났어요.",
     "preview_title": "SHOP<br>IN FRAME.",
     "preview_text": "영상을 넣고<br>상품 이야기를 시작하세요.",
@@ -114,7 +114,7 @@
   "disclosure": "[광고]",
   "media": "video",
   "min_media": 3,
-  "max_media": 10,
+  "max_media": 15,
   "links_from_system": [
     {
       "type": "SourceVideo",

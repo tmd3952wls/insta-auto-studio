@@ -11,7 +11,7 @@ from array import array
 from pathlib import Path
 
 from . import domains
-from .media import (allocate_frames, badge_image, caption_image, caption_segments, crop_photo, crop_video_frame,
+from .media import (allocate_frames, allocate_words, badge_image, caption_image, caption_segments, crop_photo, crop_video_frame,
                     cut_zoom, motion_cuts, srt_time)
 from .assets import render_revision
 from .models import MAX_CUT, MIN_CUT, MIN_MOTION_SIDE
@@ -366,7 +366,11 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
             seconds = 2 * len(scene.photos)
             lines, spans = [scene.text], [(0.0, seconds)]
         moving = [index in shots for index in scene.photos]
-        counts = allocate_frames(seconds, moving) if narrated else [60] * len(scene.photos)
+        words = [job.storyboard.segments[index].words for index in scene.photos] if longest else []
+        if narrated and words and all(words):  # Each cut starts when the words it shows are spoken.
+            counts = allocate_words(seconds, words)
+        else:
+            counts = allocate_frames(seconds, moving) if narrated else [60] * len(scene.photos)
         scene_duration = sum(counts) / 30
         scene_start = offset
         if len(spans) != len(lines):  # Fewer pauses than sentences: time the whole scene as one sentence.
