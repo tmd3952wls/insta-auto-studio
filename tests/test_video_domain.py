@@ -16,8 +16,8 @@ from studio import codex, store
 from studio.models import Job, Storyboard
 from studio.render import run
 
-SHOPPING_EXAMPLES = ('저 이거 몰라서 친정엄마한테 제대로 욕먹었어요.', '저 이것 때문에 시어머니한테 빵땡이 맞을 뻔했어요.',
-                     '나도 남겨주시면 알려드릴게요.')
+SHOPPING_EXAMPLES = ('저 이것 때문에 남편이랑 끝날 뻔했어요', '여러분 다이소 가시면 이건 꼭 사오세요',
+                     '여러분 저 드디어 찾았어요', '궁금하시면 나도 남겨주세요')
 
 
 def make_video(path, seconds=3.0, color='#3366aa', band=True, size='360x640'):

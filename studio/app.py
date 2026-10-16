@@ -988,7 +988,9 @@ async def preview(job_id: str, value: dict):
     disclosure = domains.load(job.domain).disclosure
     if disclosure:
         image = image.convert('RGBA')
-        image.alpha_composite(badge_image(disclosure))
+        # One badge, in the draft position from the editor (or the job's saved one), for photos and videos alike.
+        badge = BadgeStyle.model_validate(value['badge']) if 'badge' in value else job.options.badge
+        image.alpha_composite(badge_image(disclosure, badge))
         image = image.convert('RGB')
     data = io.BytesIO()
     image.save(data, format='JPEG', quality=95)
@@ -1022,10 +1024,6 @@ def video_preview(job, index, value, text, caption):
     image = crop_video_frame(frame, crop).convert('RGBA')
     if text.strip():
         image.alpha_composite(caption_image(text, caption))
-    disclosure = domains.load(job.domain).disclosure
-    if disclosure:  # Shown here so its position can be set by eye.
-        badge = BadgeStyle.model_validate(value['badge']) if 'badge' in value else job.options.badge
-        image.alpha_composite(badge_image(disclosure, badge))
     return image.convert('RGB')
 
 

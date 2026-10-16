@@ -129,7 +129,7 @@ async function updatePreview(){
   for(const [index,text] of cues.entries()){const button=document.createElement('button');button.type='button';button.className='outline';button.textContent=`${index+1}. ${text}`;button.setAttribute('aria-pressed',String(index===selectedCaptionCue));button.onclick=action(async()=>{selectedCaptionCue=index;await updatePreview();});captionCueControls.append(button);}
   const text=cues[selectedCaptionCue]||'';
   const body=job.photos[photo]?.kind==='video'?{photo,time:previewTime,text,caption:style,badge:badge(),...(cropDraft?{crop:cropDraft}:{})}
-    :{photo,text,caption:style,...(focus?{focus:{x:focus.x,y:focus.y}}:{})};
+    :{photo,text,caption:style,badge:badge(),...(focus?{focus:{x:focus.x,y:focus.y}}:{})};
   const blob=await api(`/api/jobs/${id}/preview`,body,true);
   if(sequence!==previewSequence||job?.id!==id||selectedPhoto!==photo||previewMode!=='photo')return;
   if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=URL.createObjectURL(blob);$('preview').src=previewUrl;

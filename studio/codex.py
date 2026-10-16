@@ -268,6 +268,16 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
                                  y=min(max(item.get('y', 0.5), 0), 1)).model_dump()
         source['crop_ai'] = dict(source['crop'])  # What "AI 제안으로 되돌리기" restores.
         source['crop_reason'] = str(item.get('reason', ''))[:200]
+    from .subtitle_crop import crop_for
+    for index, source in sources:  # Burned-in text found by reading the frames outranks the model's guess.
+        if source.get('crop', {}).get('user'):
+            continue
+        found = await asyncio.to_thread(crop_for, folder, source, index)
+        if found['crop']:
+            source['crop'] = CropBox(**found['crop']).model_dump()
+            source['crop_ai'] = dict(source['crop'])
+        if found['reason']:
+            source['crop_reason'] = found['reason'][:200]
     return plan
 
 
