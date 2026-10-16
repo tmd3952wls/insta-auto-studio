@@ -197,6 +197,7 @@ class VideoAnalysisTests(unittest.TestCase):
         picks = codex.frame_times(16.0, [2.0, 9.0])
         self.assertEqual([p[1:] for p in picks], [(0.0, 2.0), (2.0, 9.0), (2.0, 9.0), (2.0, 9.0), (9.0, 16.0), (9.0, 16.0), (9.0, 16.0)])
         self.assertEqual(len(codex.frame_times(60.0, [], limit=4)), 4)  # Thinned evenly to the frame budget.
+        self.assertEqual(codex.frame_times(51.22, [30.0, 51.18])[-1][1:], (30.0, 51.18))  # No frame past the last cut.
 
     def test_each_segment_is_cut_from_the_shot_its_words_point_to(self):
         sampled = [(0, 1.0, 1.0, 0.0, 2.0), (1, 12.5, 2.3, 9.0, 16.0)]

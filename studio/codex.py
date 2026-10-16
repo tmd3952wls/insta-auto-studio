@@ -160,6 +160,8 @@ def frame_times(duration, cuts=(), limit=8):
     edges = [0.0, *[cut for cut in cuts if 0 < cut < duration], duration]
     picks = []
     for low, high in zip(edges, edges[1:]):
+        if high - low < 0.3 and len(edges) > 2:
+            continue  # A sliver between a cut and the clip's edge has nothing worth showing.
         count = max(1, math.ceil((high - low) / SHOT_SPACING))
         picks += [(round(low + (high - low) * (n + 0.5) / count, 1), low, high) for n in range(count)]
     if len(picks) > limit:

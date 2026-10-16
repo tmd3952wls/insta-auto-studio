@@ -101,8 +101,15 @@ def video_info(path):
 
 def video_frame(path, seconds, target, width=None):
     """Saves the frame at `seconds` as a JPEG, optionally scaled to `width` pixels wide."""
-    run('-ss', f'{max(seconds, 0):.3f}', '-i', path, '-frames:v', '1',
-        *(['-vf', f'scale={width}:-2'] if width else []), '-q:v', '3', target)
+    for attempt in (seconds, seconds - 0.5, 0):
+        try:
+            run('-ss', f'{max(attempt, 0):.3f}', '-i', path, '-frames:v', '1',
+                *(['-vf', f'scale={width}:-2'] if width else []), '-q:v', '3', target)
+            return
+        except RuntimeError:
+            # A time at the very end can land past the last frame (the container runs a little longer than the video).
+            if attempt <= 0:
+                raise
 
 
 def video_frame_rate(path):
