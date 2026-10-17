@@ -224,6 +224,14 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertEqual((segments[1]['start'], segments[2]['source']), (3.4, 1))
         self.assertGreaterEqual(segments[2]['start'], 6.4)  # The repeated pick moves to the next unused shot.
 
+    def test_scenes_numbered_from_one_are_put_back_on_every_segment(self):
+        result = {'segments': [{}] * 4, 'scenes': [{'photos': [1, 2]}, {'photos': [3, 4]}]}
+        codex.repair_scenes(result)
+        self.assertEqual([s['photos'] for s in result['scenes']], [[0, 1], [2, 3]])
+        result = {'segments': [{}] * 5, 'scenes': [{'photos': [0]}, {'photos': [1, 2]}]}  # One segment left over.
+        codex.repair_scenes(result)
+        self.assertEqual([s['photos'] for s in result['scenes']], [[0, 1, 2], [3, 4]])  # Shortest scenes grow first.
+
     def test_cuts_follow_the_words_they_show(self):
         from studio.media import allocate_words
         counts = allocate_words(3.0, ['신발이', '반짝반짝 빛나요'])

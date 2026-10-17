@@ -136,6 +136,25 @@ def avoid_product(segments, flagged, lengths):
         segment['start'], segment['end'] = round(start, 2), round(start + length, 2)
 
 
+def repair_scenes(result):
+    """Keeps the model's grouping of segments into scenes but makes it use every segment once, in order: it
+    sometimes counts segments from 1 like the attached images, which leaves the first out."""
+    count, scenes = len(result.get('segments', [])), result.get('scenes', [])
+    if not scenes or [i for scene in scenes for i in scene.get('photos', [])] == list(range(count)):
+        return
+    sizes = [min(3, max(1, len(scene.get('photos', [])))) for scene in scenes]
+    while sum(sizes) > count and max(sizes) > 1:
+        sizes[sizes.index(max(sizes))] -= 1
+    while sum(sizes) < count and min(sizes) < 3:
+        sizes[sizes.index(min(sizes))] += 1
+    if sum(sizes) != count:
+        raise ValueError('AI가 장면과 영상 구간을 맞추지 못했습니다. 다시 분석해 주세요.')
+    start = 0
+    for scene, size in zip(scenes, sizes):
+        scene['photos'] = list(range(start, start + size))
+        start += size
+
+
 def take_script_options(result):
     """Keeps exactly SCRIPT_OPTIONS candidates and starts the scenes on the first one."""
     options = result.get('script_options') or []
@@ -283,6 +302,7 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
         result['script_options'] = [{'title': '내 대본', 'texts': [text for text, _ in own]}]
         result['script_choice'] = 0
     else:
+        repair_scenes(result)
         take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
     flagged = [sampled[number - 1][:3] for number in result.pop('product_frames', []) if 0 < number <= len(sampled)]
