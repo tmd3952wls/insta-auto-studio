@@ -232,6 +232,11 @@ class VideoAnalysisTests(unittest.TestCase):
         codex.repair_scenes(result)
         self.assertEqual([s['photos'] for s in result['scenes']], [[0, 1, 2], [3, 4]])  # Shortest scenes grow first.
 
+    def test_counts_in_the_script_are_written_as_numbers(self):
+        self.assertEqual(codex.digits('살림만 삼십 년 하신 장모님, 십 년 하신 삼촌, 이십오초'),
+                         '살림만 30년 하신 장모님, 10년 하신 삼촌, 25초')
+        self.assertEqual(codex.digits('이십대 언니가 이사했는데'), '이십대 언니가 이사했는데')  # Not a count.
+
     def test_cuts_follow_the_words_they_show(self):
         from studio.media import allocate_words
         counts = allocate_words(3.0, ['신발이', '반짝반짝 빛나요'])

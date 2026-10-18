@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -134,6 +135,18 @@ def avoid_product(segments, flagged, lengths):
         length = min(length, high - low)
         start = min(max(segment['start'], low), high - length)
         segment['start'], segment['end'] = round(start, 2), round(start + length, 2)
+
+
+NUMBER_WORDS = {'일': 1, '이': 2, '삼': 3, '사': 4, '오': 5, '육': 6, '칠': 7, '팔': 8, '구': 9}
+SINO_NUMBER = re.compile(r'(?<![가-힣])([이삼사오육칠팔구]?십[일이삼사오육칠팔구]?)\s*(년|살|초|분|개월|가지|배)')
+
+
+def digits(text):
+    """Writes Sino-Korean counts as numerals ("삼십 년" -> "30년") so captions show the number at a glance."""
+    def number(match):
+        tens, _, ones = match[1].partition('십')
+        return f'{NUMBER_WORDS.get(tens, 1) * 10 + NUMBER_WORDS.get(ones, 0)}{match[2]}'
+    return SINO_NUMBER.sub(number, text)
 
 
 def repair_scenes(result):
@@ -303,6 +316,8 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
         result['script_choice'] = 0
     else:
         repair_scenes(result)
+        for option in result.get('script_options') or []:  # Counts as numerals, however the model wrote them.
+            option['texts'] = [digits(text) for text in option.get('texts', [])]
         take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
     flagged = [sampled[number - 1][:3] for number in result.pop('product_frames', []) if 0 < number <= len(sampled)]
