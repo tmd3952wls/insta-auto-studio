@@ -299,14 +299,31 @@ function drawScript(){
     body.append(text,info);if(job.storyboard.segments?.length)body.append(segmentRows(scene,index));if(hasNarration())body.append(mediaControls('voice',index));row.append(number,body);panel.append(row);
   });drawMotion();
 }
+let editingOption=null;  // Script candidate being edited in place (double-click a card).
+function optionEditor(option,index){
+  const form=document.createElement('div');form.className='script-option editing';
+  const title=document.createElement('strong');title.textContent=`${index+1}. ${option.title} · 고치는 중`;form.append(title);
+  const fields=option.texts.map(text=>{const field=document.createElement('textarea');field.value=text;field.maxLength=160;field.rows=2;form.append(field);return field;});
+  const row=document.createElement('div');row.className='option-actions';
+  const save=document.createElement('button');save.type='button';save.className='dark';save.textContent='저장';
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='outline';cancel.textContent='취소';
+  save.onclick=action(async()=>{const texts=fields.map(field=>field.value.trim());if(texts.some(text=>!text))throw new Error('빈 문장이 있어요. 문장을 채워 주세요.');
+    option.texts=texts;const plan=job.storyboard;if(index===plan.script_choice){plan.scenes.forEach((scene,i)=>{scene.text=texts[i];});const scene=currentScene();if(scene)$('captionText').value=scene.text;}
+    editingOption=null;planChanged();drawScript();queuePreview();});
+  cancel.onclick=()=>{editingOption=null;drawScript();};
+  row.append(save,cancel);form.append(row);setTimeout(()=>fields[0]?.focus(),0);return form;
+}
 function drawScriptOptions(panel){
   const options=job.storyboard.script_options||[];if(options.length<2)return;
   const box=document.createElement('div');box.className='script-options';box.setAttribute('role','radiogroup');box.setAttribute('aria-label','대본 후보');
-  const heading=document.createElement('h3');heading.textContent=`대본 후보 ${options.length}개 · 하나를 고른 뒤 아래에서 고칠 수 있어요`;box.append(heading);
+  const heading=document.createElement('h3');heading.textContent=`대본 후보 ${options.length}개 · 눌러서 고르고, 더블클릭하면 바로 고칠 수 있어요`;box.append(heading);
+  if(editingOption!==null&&(editingOption>=options.length||planLocked()))editingOption=null;
   options.forEach((option,index)=>{
+    if(editingOption===index){box.append(optionEditor(option,index));return;}
     const chosen=index===job.storyboard.script_choice,card=document.createElement('button');card.type='button';card.className='script-option';card.setAttribute('role','radio');card.setAttribute('aria-checked',String(chosen));card.disabled=planLocked();
     const title=document.createElement('strong');title.textContent=`${index+1}. ${option.title}`+(chosen?' · 사용 중':'');const text=document.createElement('p');text.textContent=option.texts.join(' ');card.append(title,text);
-    card.onclick=()=>chooseScript(index);box.append(card);
+    card.onclick=()=>chooseScript(index);card.title='누르면 이 대본을 쓰고, 더블클릭하면 바로 고칠 수 있어요';
+    card.ondblclick=event=>{event.preventDefault();if(planLocked())return;editingOption=index;drawScript();};box.append(card);
   });panel.append(box);
 }
 function chooseScript(index){
