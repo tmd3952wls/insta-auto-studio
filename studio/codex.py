@@ -115,26 +115,39 @@ def facts_block(job):
 
 def avoid_product(segments, flagged, lengths):
     """Moves each segment off the stretches around frames where the product's package or name shows.
-    `flagged` holds (source, seconds, spacing of that source's sample frames)."""
+    `flagged` holds (source, seconds, spacing of that source's sample frames). A source the model flagged almost
+    everywhere (it over-flags) gives its segment to the longest clear stretch of another source; with none
+    anywhere the segment stays, since a glimpse of the product beats stopping the whole edit."""
+    def blocked(source):
+        return sorted((t - gap / 2 - 0.1, t + gap / 2 + 0.1) for s, t, gap in flagged if s == source)
+
+    def free(source):
+        stretches, cursor = [], 0.0
+        for low, high in blocked(source):
+            if low > cursor:
+                stretches.append((cursor, low))
+            cursor = max(cursor, high)
+        return stretches + [(cursor, lengths[source])] if cursor < lengths[source] else stretches
+
     for segment in segments:
         source = segment['source']
-        blocked = sorted((t - gap / 2 - 0.1, t + gap / 2 + 0.1) for s, t, gap in flagged if s == source)
-        if all(segment['end'] <= low or segment['start'] >= high for low, high in blocked):
+        if all(segment['end'] <= low or segment['start'] >= high for low, high in blocked(source)):
             continue
-        free, cursor = [], 0.0
-        for low, high in blocked:
-            if low > cursor:
-                free.append((cursor, low))
-            cursor = max(cursor, high)
-        free.append((cursor, lengths[source]))
         length = segment['end'] - segment['start']
-        fits = [(low, high) for low, high in free if high - low >= min(length, MIN_SEGMENT * 2)]
-        if not fits:
-            raise ValueError(f'{source + 1}번 영상은 제품이 보이지 않는 부분이 거의 없습니다. 이 영상을 빼거나 다른 영상을 넣어 주세요.')
-        low, high = min(fits, key=lambda f: abs(min(max(segment['start'], f[0]), f[1]) - segment['start']))
+        fits = [(low, high) for low, high in free(source) if high - low >= min(length, MIN_SEGMENT * 2)]
+        if fits:
+            low, high = min(fits, key=lambda f: abs(min(max(segment['start'], f[0]), f[1]) - segment['start']))
+            start = segment['start']
+        else:
+            others = [(high - low, other, low, high) for other in lengths if other != source
+                      for low, high in free(other) if high - low >= min(length, MIN_SEGMENT * 2)]
+            if not others:
+                continue
+            _, source, low, high = max(others)
+            start = low
         length = min(length, high - low)
-        start = min(max(segment['start'], low), high - length)
-        segment['start'], segment['end'] = round(start, 2), round(start + length, 2)
+        start = min(max(start, low), high - length)
+        segment.update(source=source, start=round(start, 2), end=round(start + length, 2))
 
 
 NUMBER_WORDS = {'일': 1, '이': 2, '삼': 3, '사': 4, '오': 5, '육': 6, '칠': 7, '팔': 8, '구': 9}

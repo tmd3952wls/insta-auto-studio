@@ -265,8 +265,13 @@ class VideoAnalysisTests(unittest.TestCase):
         codex.avoid_product(segments, [(0, 2.5, 1.0), (0, 3.5, 1.0)], {0: 8.0, 1: 4.0})
         self.assertEqual(segments[0], {'source': 0, 'start': 0.4, 'end': 1.9})  # The nearest clear stretch, before 1.9 s.
         self.assertEqual(segments[1], {'source': 1, 'start': 0.0, 'end': 1.5})  # Other sources are untouched.
-        with self.assertRaisesRegex(ValueError, '1번 영상은 제품이'):
-            codex.avoid_product([{'source': 0, 'start': 0.0, 'end': 1.5}], [(0, t + 0.5, 1.0) for t in range(4)], {0: 4.0})
+        everywhere = [(0, t + 0.5, 1.0) for t in range(4)]  # Source 0 flagged in every frame: borrow source 1.
+        segments = [{'source': 0, 'start': 0.0, 'end': 1.5}]
+        codex.avoid_product(segments, everywhere + [(1, 0.5, 1.0)], {0: 4.0, 1: 5.0})
+        self.assertEqual(segments[0], {'source': 1, 'start': 1.1, 'end': 2.6})
+        segments = [{'source': 0, 'start': 0.0, 'end': 1.5}]  # Nowhere clear at all: keep it rather than stop.
+        codex.avoid_product(segments, everywhere, {0: 4.0})
+        self.assertEqual(segments[0], {'source': 0, 'start': 0.0, 'end': 1.5})
 
     def test_a_slot_plays_from_one_shot_of_its_source(self):
         from studio.render import fit_segment
