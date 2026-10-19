@@ -832,6 +832,37 @@ async def append_candidates(job_id: str, files: list[UploadFile] = File(...)):
     return job.model_dump()
 
 
+@app.post('/api/jobs/{job_id}/videos/{index}/remove')
+async def remove_video(job_id: str, index: int):
+    """Drops one uploaded source video. Segments cut from it go with it, so a plan that used it must be analysed again."""
+    job = store.read(job_id)
+    editable(job)
+    if not 0 <= index < len(job.photos) or job.photos[index].get('kind') != 'video':
+        raise ValueError('삭제할 영상을 찾지 못했습니다.')
+    removed = job.photos.pop(index)
+    folder = job_path(job_id)
+    for name in (removed.get('file'), removed.get('thumb')):
+        if name:
+            for path in folder.glob(name + '*'):  # The clip, its thumbnail and their cached cut/text readings.
+                path.unlink(missing_ok=True)
+    if job.photo_order:
+        job.photo_order = [i - (i > index) for i in job.photo_order if i != index]
+    thumbnail = job.options.thumbnail
+    if thumbnail.source is not None:
+        thumbnail.source = None if thumbnail.source == index else thumbnail.source - (thumbnail.source > index)
+    if job.storyboard and any(segment.source == index for segment in job.storyboard.segments):
+        job.storyboard, job.narration = None, {}
+        job.message = '영상을 삭제했습니다. 그 영상을 쓰던 대본·구간은 지웠으니 영상 분석을 다시 실행해 주세요.'
+    else:
+        if job.storyboard:
+            for segment in job.storyboard.segments:
+                segment.source -= segment.source > index
+        job.message = f'영상을 삭제했습니다. 남은 영상 {len(job.photos)}개입니다.'
+    job.result = job.preview = None
+    store.save(job)
+    return job.model_dump()
+
+
 @app.post('/api/jobs/{job_id}/candidates/remove')
 async def remove_candidates(job_id: str, value: dict):
     job = store.read(job_id)

@@ -155,7 +155,13 @@ function videoCard(index,position){
   const image=document.createElement('img');image.src=`/api/jobs/${job.id}/files/${photo.thumb}`;image.alt=photo.name;image.loading='lazy';image.draggable=false;
   const number=document.createElement('span');number.textContent=`${String(position+1).padStart(2,'0')} · ${photo.duration.toFixed(1)}초`;button.append(image,number);
   const zoom=photo.crop?.zoom||1;if(zoom>1.001){const badge=document.createElement('b');badge.className='hd-badge';badge.textContent=`×${zoom.toFixed(2)}`;badge.title='자막 가림 확대';button.append(badge);}
-  button.onclick=action(()=>selectSource(index));const name=document.createElement('small');name.textContent=photo.name;card.append(button,name);return card;
+  button.onclick=action(()=>selectSource(index));const name=document.createElement('small');name.textContent=photo.name;
+  const remove=document.createElement('button');remove.type='button';remove.className='remove-source';remove.textContent='×';remove.title='이 영상 삭제';remove.setAttribute('aria-label',`${position+1}번 영상 삭제`);
+  remove.disabled=Boolean(sourceBusy||busyStates.has(job.state));
+  remove.onclick=action(async()=>{const used=job.storyboard?.segments?.some(s=>s.source===index);
+    if(!confirm(`${photo.name}\n이 영상을 삭제할까요?`+(used?'\n\n이 영상을 쓰는 대본·구간이 있어서, 삭제하면 영상 분석을 다시 해야 해요.':'')))return;
+    job=await api(`/api/jobs/${job.id}/videos/${index}/remove`,{});if(selectedPhoto>=job.photos.length)selectedPhoto=0;cropDraft=null;drawPhotos();drawScript();drawStatus();if(job.photos.length)await updatePreview();});
+  card.append(button,remove,name);return card;
 }
 function selectedSource(){const photo=job?.photos[selectedPhoto];return photo?.kind==='video'?photo:null;}
 function drawCropEditor(){

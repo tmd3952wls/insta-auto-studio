@@ -72,6 +72,23 @@ class VideoApiTests(unittest.TestCase):
         again = self.client.post(f"/api/jobs/{job['id']}/videos", headers=self.headers, files=self.files(self.clips[:1]))
         self.assertEqual(len(again.json()['photos']), 4)  # The same file is not added twice.
 
+    def test_one_uploaded_video_can_be_removed(self):
+        job = self.upload(self.clips).json()
+        folder = self.folder / 'jobs' / job['id']
+        gone = job['photos'][1]['file']
+        storyboard = {'scenes': [{'photos': [0], 'text': '가.'}], 'segments': [{'source': 2, 'start': 0.0, 'end': 1.5}]}
+        stored = module.store.read(job['id'])
+        stored.storyboard = Storyboard.validate_video_plan(storyboard, stored.photos)
+        module.store.save(stored)
+        url = f"/api/jobs/{job['id']}/videos/{{}}/remove"
+        job = self.client.post(url.format(1), headers=self.headers, json={}).json()
+        self.assertEqual(len(job['photos']), 3)
+        self.assertFalse((folder / gone).exists())
+        self.assertEqual(job['storyboard']['segments'][0]['source'], 1)  # The plan still points at the same clip.
+        job = self.client.post(url.format(1), headers=self.headers, json={}).json()
+        self.assertIsNone(job['storyboard'])  # Its clip is gone: the plan must be analysed again.
+        self.assertEqual(self.client.post(url.format(9), headers=self.headers, json={}).status_code, 400)
+
     def test_shopping_rejects_photos_and_non_videos(self):
         data = io.BytesIO()
         Image.new('RGB', (800, 600), 'orange').save(data, format='JPEG')
