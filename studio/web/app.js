@@ -155,7 +155,7 @@ function videoCard(index,position){
   const image=document.createElement('img');image.src=`/api/jobs/${job.id}/files/${photo.thumb}`;image.alt=photo.name;image.loading='lazy';image.draggable=false;
   const number=document.createElement('span');number.textContent=`${String(position+1).padStart(2,'0')} · ${photo.duration.toFixed(1)}초`;button.append(image,number);
   const zoom=photo.crop?.zoom||1;if(zoom>1.001){const badge=document.createElement('b');badge.className='hd-badge';badge.textContent=`×${zoom.toFixed(2)}`;badge.title='자막 가림 확대';button.append(badge);}
-  button.onclick=action(()=>selectSource(index));const name=document.createElement('small');name.textContent=photo.name;
+  button.onclick=action(()=>selectSource(index));const name=document.createElement('small');name.textContent=photo.name+(photo.found?.how?` · ${photo.found.how}`:'');if(photo.found?.reason)name.title=photo.found.reason;
   const remove=document.createElement('button');remove.type='button';remove.className='remove-source';remove.textContent='×';remove.title='이 영상 삭제';remove.setAttribute('aria-label',`${position+1}번 영상 삭제`);
   remove.disabled=Boolean(sourceBusy||busyStates.has(job.state));
   remove.onclick=action(async()=>{const used=job.storyboard?.segments?.some(s=>s.source===index);
@@ -414,7 +414,7 @@ function drawStatus(){
     }
   }
   for(const button of document.querySelectorAll('.history-job'))button.disabled=sourceBusy;
-  drawCollection();
+  drawCollection();drawShopSearch();
   motionControls();
   for(const id of [...numericControls,...numericControls.map(id=>id+'Input'),'captionText','color','outline','bgOpacity','shadow','speed','motion','captionAlign',...badgeControls,...thumbControls,'thumbPick','thumbShow'])$(id).disabled=Boolean(busy);
   $('captionPreset').disabled=Boolean(busy);$('saveCaptionPreset').disabled=Boolean(busy)||!numericValid();
@@ -433,7 +433,7 @@ async function loadJob(id){
   resetPreview();job=next;dirtyScript=Boolean(next.photo_plan_migration);dirtyStyle=dirtyFacts=false;candidateSelected.clear();
   selectedPhoto=job.photo_order?.[0]??job.storyboard?.scenes[0]?.photos[0]??0;previewMode=!next.photo_plan_migration&&(job.preview||job.result)?'video':'photo';
   const first=job.storyboard?.segments?.[0];selectedSegment=first?0:null;cropDraft=null;previewTime=first?first.start:0;if(first)selectedPhoto=first.source;
-  loadStyle();const scene=currentScene();if(scene)$('captionText').value=scene.text;await updatePreview();
+  loadStyle();const scene=currentScene();if(scene)$('captionText').value=scene.text;loadShopSearch().catch(showError);await updatePreview();
 }
 async function upload(files){
   if(!files.length)return;
@@ -502,6 +502,59 @@ $('importPhotos').onclick=action(async()=>{
   try{job=await api('/api/composition',{collection_id:collection.id,photos:[...collectionSelected],job_id:job?.id,mode:'manual'});dirtyScript=dirtyStyle=dirtyFacts=false;previewMode='photo';collectionSelected.clear();selectedPhoto=0;loadStyle();drawPhotos();drawScript();await updatePreview();await history();}
   finally{sourceBusy=false;drawStatus();}
 });
+// 쇼핑: 인스타 릴스 링크로 소재 영상 찾기. 서버가 별도 프로그램(shop_auto_search)을 하나씩 차례로 돌리고, 끝나면 영상을 이 작업에 넣는다.
+let shopSearch=null;
+function shopActive(search){return Boolean(search&&['waiting','running'].includes(search.state));}
+async function loadShopSearch(){
+  const id=job?.id;if(!id||!videoDomain()){shopSearch=null;drawShopSearch();return;}
+  const list=await api('/api/shop-searches?job_id='+id);if(job?.id!==id)return;
+  const previous=shopSearch;shopSearch=list[0]||null;drawShopSearch();
+  if(previous?.id===shopSearch?.id&&shopActive(previous)&&!shopActive(shopSearch))await shopSearchFinished(id);
+}
+async function shopSearchFinished(id){
+  // New videos arrived: refresh the list only (style and info being edited stay as they are).
+  const next=await api('/api/jobs/'+id);if(job?.id!==id)return;
+  job=next;if(selectedPhoto>=job.photos.length)selectedPhoto=job.photo_order?.[0]??0;drawPhotos();drawStatus();
+  if(job.photos.length&&previewMode==='photo')await updatePreview();await history();
+}
+function drawShopSearch(){
+  $('shopSearch').hidden=domainInfo()?.media!=='video';
+  const search=shopSearch&&shopSearch.job_id===job?.id?shopSearch:null,active=shopActive(search);
+  const scripted=Boolean(job&&(job.storyboard||Object.keys(job.generated).length||Object.keys(job.narration).length||job.result));
+  $('shopSearchStart').disabled=Boolean(sourceBusy||active||scripted||(job&&busyStates.has(job.state)));
+  $('shopSearchStart').title=scripted?'대본을 만든 작업에는 영상을 더 넣을 수 없어요. 새 작업에서 찾아 주세요.':'';
+  $('shopUrl').disabled=Boolean(sourceBusy||active);
+  $('shopSearchHelp').textContent=scripted?'이 작업은 대본을 이미 만들어서 영상을 더 넣을 수 없어요. [새 작업 +]을 누른 뒤 링크를 넣어 주세요.':'도우인·틱톡에서 같은 제품 영상을 찾아 중국 자막을 지운 뒤, 아래 영상 목록에 자동으로 넣어요. 30~60분쯤 걸리고, 여러 개를 넣으면 하나씩 차례로 진행해요.';
+  $('shopSearchState').hidden=!search;if(!search)return;
+  const steps=$('shopSearchSteps');steps.replaceChildren();
+  search.steps.forEach((name,i)=>{const n=i+1,item=document.createElement('li');item.textContent=`${n}. ${name}`;
+    item.classList.toggle('done',search.state==='done'||n<search.step);item.classList.toggle('current',active&&n===search.step);
+    item.classList.toggle('failed',search.state==='failed'&&n===Math.max(search.step,1));steps.append(item);});
+  $('shopSearchNotice').hidden=!(active&&search.notice);$('shopSearchNotice').textContent=search.notice?`⚠ 직접 해 주세요: ${search.notice}`:'';
+  const info=[search.state==='waiting'?(search.ahead?`앞에 ${search.ahead}개 소재 찾기가 진행 중이에요. 차례가 오면 자동으로 시작해요.`:'곧 시작해요.')
+    :search.state==='running'?`지금: ${search.step_text}`:search.state==='done'?`완료! 찾은 영상 ${search.added}개를 아래 목록에 넣었어요.`+(search.skipped.length?` (${search.skipped.length}개는 못 넣음)`:''):search.state==='cancelled'?'소재 찾기를 취소했어요.':'소재 찾기가 실패했어요.'];
+  if(search.product)info.push(`제품: ${search.product}`);if(search.keywords)info.push(`검색어: ${search.keywords}`);
+  if(active)info.push('진행 중에 대본을 만들면 찾은 영상을 넣을 수 없어요. 끝날 때까지 기다려 주세요.');
+  $('shopSearchInfo').textContent=info.join('\n');$('shopSearchInfo').style.whiteSpace='pre-line';
+  const problems=[search.state==='failed'?search.error:'',...(search.state==='done'?search.skipped:[])].filter(Boolean);
+  $('shopSearchError').hidden=!problems.length;$('shopSearchError').textContent=problems.join('\n');$('shopSearchError').style.whiteSpace='pre-line';
+  $('shopSearchLog').textContent=(search.log||[]).join('\n');$('shopSearchLogBox').hidden=!search.log?.length;
+  $('shopSearchCancel').hidden=!active;
+}
+$('shopSearchStart').onclick=action(async()=>{
+  const url=$('shopUrl').value.trim();if(!url)throw new Error('인스타 릴스 링크를 넣어 주세요.');
+  const target=job?.id,selectedSettings=!target?options():null;
+  sourceBusy=true;drawStatus();
+  try{if(target&&hasUnsavedEdits())await persistEdits();
+    const value=await api('/api/shop-searches',{url,job_id:target||null,domain:chosenDomain});
+    shopSearch=value.search;$('shopUrl').value='';
+    if(!target){resetPreview();job=value.job;dirtyScript=dirtyStyle=dirtyFacts=false;job=await api(`/api/jobs/${job.id}/style`,selectedSettings);previewMode='photo';selectedPhoto=0;loadStyle();drawPhotos();drawScript();}
+    else job=await api('/api/jobs/'+job.id);
+    await history();}
+  finally{sourceBusy=false;drawStatus();}
+});
+$('shopUrl').addEventListener('keydown',event=>{if(event.key==='Enter'&&!$('shopSearchStart').disabled){event.preventDefault();$('shopSearchStart').click();}});
+$('shopSearchCancel').onclick=action(async()=>{if(!shopSearch||!confirm('소재 찾기를 취소할까요? 진행 중이던 브라우저도 닫혀요.'))return;shopSearch=await api(`/api/shop-searches/${shopSearch.id}/cancel`,{});drawShopSearch();});
 async function restoreCollection(){
   let id;try{id=localStorage.getItem('stayCollection');}catch{return;}
   if(!id)return;
@@ -516,7 +569,7 @@ for(const id of numericControls){
 }
 $('newJob').onclick=()=>{
   if(!confirmDiscard())return;
-  resetPreview();job=null;dirtyScript=dirtyStyle=dirtyFacts=false;uiError=null;candidateSelected.clear();
+  resetPreview();job=null;shopSearch=null;dirtyScript=dirtyStyle=dirtyFacts=false;uiError=null;candidateSelected.clear();
   for(const id of [...numericControls,...numericControls.map(id=>id+'Input'),'color','outline','bgOpacity','shadow','captionText'])$(id).value=$(id).defaultValue;
   $('speed').value='1';for(const id of numericControls){$(id+'Error').hidden=true;$(id+'Input').removeAttribute('aria-invalid');}
   $('files').value='';motionOptions();updateOutputs();drawPhotos();drawScript();drawStatus();
@@ -570,6 +623,7 @@ setInterval(async()=>{
       if(next.photo_plan_migration)dirtyScript=true;
       if(job?.id===id){const before=JSON.stringify(job.photos);job=next;drawStatus();if(previous===job.state&&before!==JSON.stringify(job.photos)){drawPhotos();if(previewMode==='photo')await updatePreview();}if(previous!==job.state){drawScript();drawPhotos();if(job.state==='uploaded'&&job.storyboard){loadStyle();$('captionText').value=job.storyboard.scenes[0].text;await updatePreview();}if(['complete','preview_ready'].includes(job.state))await selectJob(job.id);await history();}}
     }
+    if(job&&shopActive(shopSearch))await loadShopSearch();
     if(collection?.status==='in_progress'){
       const id=collection.id,next=await api('/api/collections/'+id);if(collection?.id===id){collection=next;drawCollection();}
     }

@@ -139,3 +139,7 @@ summary{padding:6px 0;line-height:1.7;font-size:12px}
 .provenance{font-size:11px;margin:-6px 0 14px}
 .source-video{position:relative}.source-video .remove-source{position:absolute;left:4px;top:4px;width:22px;height:22px;min-height:0;padding:0;border-radius:50%;background:#202d2bd9;color:#fff;font-size:14px;line-height:22px;aspect-ratio:auto}.source-video .remove-source:hover{background:#b94c33}
 .script-option.editing textarea{display:block;width:100%;margin:6px 0;padding:8px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:12px;line-height:1.6;resize:vertical}.script-option .option-actions{display:flex;gap:8px;margin-top:8px}.script-option .option-actions button{flex:1;min-height:34px}
+.shop-search h3{font-size:12px;color:var(--green)}.shop-search #shopSearchState{margin-top:14px}
+.shop-steps{list-style:none;padding:0;margin:10px 0;display:grid;gap:4px}.shop-steps li{font-size:11px;color:var(--muted);padding:5px 8px;border-radius:4px}.shop-steps li.done{color:var(--green)}.shop-steps li.done:before{content:'✓ '}.shop-steps li.current{background:var(--mint);color:var(--ink);font-weight:700}.shop-steps li.current:before{content:'▶ '}.shop-steps li.failed{background:#f6ddd5;color:#933d29}
+.shop-notice{background:#ffe38a;border:2px solid #e0a400;border-radius:6px;padding:12px;font-size:13px;font-weight:700;color:#3d2d00;line-height:1.6;box-shadow:0 0 0 3px #ffe38a66}
+.shop-search pre{max-height:180px;overflow:auto;background:#fbfbf6;border:1px solid var(--line);padding:8px;font-size:10px}

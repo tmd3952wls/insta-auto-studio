@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from . import assets, codex, collector, composition, domains, enhance, performance, recommendation, store, video_models
+from . import assets, codex, collector, composition, domains, enhance, performance, recommendation, sourcing, store, video_models
 from .drama import Drama
 from .fish import Fish
 from .media import badge_image, caption_image, caption_segments, crop_photo, crop_video_frame, preview_image
@@ -95,6 +95,7 @@ async def lifespan(app):
     store.recover()
     collector.recover()
     spawn(restore_fish())
+    spawn(sourcing.worker(deliver_search))
     yield
     tasks = list(background) + list(pipeline.tasks.values())
     for task in tasks:
@@ -316,6 +317,101 @@ async def append_videos(job_id: str, files: list[UploadFile] = File(...)):
     if domains.load(job.domain).media != 'video':
         raise ValueError('이 작업에는 사진을 넣어 주세요.')
     return (await add_videos(job, files)).model_dump()
+
+
+class LocalVideo:
+    """A finished video on disk, read the way add_videos reads an upload."""
+    def __init__(self, path):
+        self.filename, self.file = Path(path).name, open(path, 'rb')
+
+    async def read(self, size):
+        return self.file.read(size)
+
+
+async def deliver_search(search):
+    """Puts a shop search's final videos into its shopping job, one by one, exactly as a manual upload would."""
+    result = search['result']
+    try:
+        job = store.read(search['job_id'])
+    except FileNotFoundError:
+        raise ValueError('소재를 넣을 쇼핑 작업이 지워졌어요.')
+    domain = domains.load(job.domain)
+    for _ in range(600):  # A running analysis or render finishes first (up to 10 minutes).
+        if not pipeline.busy(job.id):
+            break
+        await asyncio.sleep(1)
+    added, skipped = 0, []
+    for item in result['files']:
+        path = Path(item.get('file', ''))
+        if not path.is_file():
+            skipped.append(f'{path.name}: 파일이 없어요')
+            continue
+        job = store.read(search['job_id'])
+        if len(job.photos) >= domain.max_media:
+            skipped.append(f'{path.name}: 영상은 최대 {domain.max_media}개까지 넣을 수 있어요')
+            continue
+        before = len(job.photos)
+        upload = LocalVideo(path)
+        try:
+            job = await add_videos(job, [upload])
+        except ValueError as error:
+            if job.storyboard or job.generated or job.narration or job.result:
+                raise ValueError('이미 대본을 만든 작업이라 영상을 넣지 못했어요. 새 작업에서 다시 찾아 주세요.') from error
+            skipped.append(f'{path.name}: {error}')
+            continue
+        finally:
+            upload.file.close()
+        if len(job.photos) > before:
+            job.photos[-1]['found'] = {k: item.get(k, '') for k in ('how', 'quality', 'reason')}
+            added += 1
+        else:
+            skipped.append(f'{path.name}: 이미 넣은 영상이에요')
+        store.save(job)
+    search['added'], search['skipped'] = added, skipped
+    job = store.read(search['job_id'])
+    if result.get('product'):
+        for source in job.sources:
+            if source.get('url') == search['url']:
+                source['name'] = result['product'][:80]
+    job.message = f'인스타 링크로 찾은 영상 {added}개를 넣었어요.' + (f' {len(skipped)}개는 넣지 못했어요.' if skipped else '')
+    store.save(job)
+    if not added:
+        raise ValueError('찾은 영상을 하나도 넣지 못했어요. ' + ' / '.join(skipped[:3]))
+
+
+@app.post('/api/shop-searches', status_code=202)
+async def start_shop_search(value: dict):
+    """Queues a material search from an Instagram reel link for a shopping job (a new one when none is given)."""
+    url = value.get('url')
+    if not isinstance(url, str) or not sourcing.LINK.match(url.strip()):
+        raise ValueError('인스타 릴스 링크를 넣어 주세요. 예: https://www.instagram.com/reel/…')
+    if value.get('job_id'):
+        job = store.read(value['job_id'])
+        if domains.load(job.domain).media != 'video':
+            raise ValueError('소재 찾기는 쇼핑 작업에서만 쓸 수 있어요.')
+        if job.storyboard or job.generated or job.narration or job.result:
+            raise ValueError('이미 대본을 만든 작업이에요. [새 작업 +]을 누른 뒤 소재를 찾아 주세요.')
+    else:
+        job = new_job(value.get('domain') or 'shopping', workflow_version=2)
+        if domains.load(job.domain).media != 'video':
+            raise ValueError('소재 찾기는 쇼핑 작업에서만 쓸 수 있어요.')
+    search = sourcing.queue(job.id, url)
+    if not any(s.get('url') == search['url'] for s in job.sources):
+        job.sources.append({'name': '인스타 소재 찾기', 'url': search['url']})
+    if not job.photos:
+        job.message = '인스타 링크로 소재 영상을 찾고 있어요.'
+    store.save(job)
+    return {'search': sourcing.public(search), 'job': job.model_dump()}
+
+
+@app.get('/api/shop-searches')
+async def shop_searches(job_id: str):
+    return sourcing.for_job(job_id)
+
+
+@app.post('/api/shop-searches/{search_id}/cancel')
+async def cancel_shop_search(search_id: str):
+    return sourcing.public(await asyncio.to_thread(sourcing.cancel, search_id))
 
 
 @app.post('/api/jobs/{job_id}/sources/{index}/crop')

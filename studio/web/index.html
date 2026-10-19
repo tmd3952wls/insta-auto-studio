@@ -19,6 +19,12 @@
 <p id="collectionStatus" class="muted" role="status">수집용 브라우저가 열립니다. 수집이 끝나면 사진을 골라 추가하세요.</p>
 <div id="collectionGallery" hidden><strong id="collectionName"></strong><div class="collection-actions"><button id="selectCollection" class="quiet">사진 선택</button><button id="clearCollection" class="quiet">선택 해제</button><span id="collectionCount"></span></div><div id="collectionGrid" class="collection-grid"></div><button id="importPhotos" class="mint" disabled>선택한 사진 추가</button><details id="collectionFailures" hidden><summary>수집하지 못한 사진</summary><ul id="collectionFailureList"></ul></details></div>
 </details>
+<section class="link-source shop-search" id="shopSearch" hidden aria-labelledby="shopSearchHeading"><h3 id="shopSearchHeading">인스타 링크로 소재 찾기</h3>
+<label class="field" for="shopUrl">인스타 릴스 링크<input id="shopUrl" type="url" placeholder="https://www.instagram.com/reel/…" autocomplete="off"></label>
+<button id="shopSearchStart" class="outline">소재 찾기 ↗</button>
+<p id="shopSearchHelp" class="muted">도우인·틱톡에서 같은 제품 영상을 찾아 중국 자막을 지운 뒤, 아래 영상 목록에 자동으로 넣어요. 30~60분쯤 걸리고, 여러 개를 넣으면 하나씩 차례로 진행해요.</p>
+<div id="shopSearchState" hidden><p id="shopSearchNotice" class="shop-notice" role="alert" hidden></p><ol id="shopSearchSteps" class="shop-steps"></ol><p id="shopSearchInfo" class="muted"></p><p id="shopSearchError" class="input-error" hidden></p><details id="shopSearchLogBox"><summary>진행 기록 보기</summary><pre id="shopSearchLog"></pre></details><button id="shopSearchCancel" class="quiet" type="button" hidden>소재 찾기 취소</button></div>
+</section>
 <section id="factsPanel" class="facts-panel" hidden><h3><span id="factsTitle">정보</span> <span>(선택)</span></h3><p id="factsHelp" class="muted">대본의 사실 근거로만 쓰여요. 가격·효능 같은 사실은 여기에 적은 것만 대본에 들어가요.</p><div id="factsFields"></div></section>
 <p id="sourceNames" class="source-names" hidden></p><p id="photoLockNote" class="muted" hidden>작업이 진행 중입니다. 완료 후 사진을 수정하세요.</p>
 <details id="candidatePanel" hidden><summary id="candidateCount">후보 사진</summary><p class="muted">사용할 사진을 순서대로 고르세요. 현재 구성을 교체하면 대본을 다시 작성합니다. AI 추천은 이 후보 안에서만 고릅니다.</p><div id="candidateGrid" class="collection-grid"></div><button id="applyCandidates" class="outline">선택한 사진으로 구성</button> <button id="removeCandidates" class="quiet">선택한 사진 후보에서 제거</button></details>
