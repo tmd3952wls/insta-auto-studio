@@ -89,6 +89,16 @@ class VideoApiTests(unittest.TestCase):
         self.assertIsNone(job['storyboard'])  # Its clip is gone: the plan must be analysed again.
         self.assertEqual(self.client.post(url.format(9), headers=self.headers, json={}).status_code, 400)
 
+    def test_reels_made_from_each_candidate_can_be_downloaded(self):
+        job = self.upload(self.clips[:3]).json()
+        stored = module.store.read(job['id'])
+        stored.batch = {'results': [{'title': '하나', 'file': 'option-1-reel.mp4', 'duration': 1.0, 'warnings': []}]}
+        module.store.save(stored)
+        (self.folder / 'jobs' / job['id'] / 'option-1-reel.mp4').write_bytes(b'reel')
+        url = f"/api/jobs/{job['id']}/files/{{}}"
+        self.assertEqual(self.client.get(url.format('option-1-reel.mp4')).content, b'reel')
+        self.assertEqual(self.client.get(url.format('option-2-reel.mp4')).status_code, 404)  # Only files it made.
+
     def test_shopping_rejects_photos_and_non_videos(self):
         data = io.BytesIO()
         Image.new('RGB', (800, 600), 'orange').save(data, format='JPEG')

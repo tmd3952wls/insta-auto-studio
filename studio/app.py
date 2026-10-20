@@ -1186,6 +1186,8 @@ async def files(job_id: str, name: str, download: bool = False):
     if job.preview:
         allowed |= {job.preview[k] for k in ('file', 'video', 'audio', 'script', 'srt', 'verification') if k in job.preview}
     allowed |= {r['file'] for r in job.assets.values() if r.get('file', '').endswith('.mp4')}
+    allowed |= {result[kind] for result in job.batch.get('results', [])  # One reel per script candidate.
+                for kind in ('file', 'video', 'audio', 'script', 'srt') if result.get(kind)}
     if Path(name).name != name or name not in allowed:
         raise HTTPException(404)
     path = job_path(job_id) / name
