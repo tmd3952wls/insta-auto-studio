@@ -2,14 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import shutil
 import uuid
 from pathlib import Path
 
 from . import assets, codex, composition, domains, enhance, performance, recommendation, store
 from .media import crop_photo
-from .models import MIN_MOTION_SIDE, motion_fingerprint, stable_hash
+from .models import MIN_MOTION_SIDE, Scene, motion_fingerprint, stable_hash
 from .paths import job_path
 from .render import publish_preview, render, video_size
+
+
+BATCH_EXPORTS = {'file': 'reel.mp4', 'video': 'video.mp4', 'audio': 'voice.mp3', 'script': 'script.txt', 'srt': 'reel.srt'}
+
+
+def use_option_thumbnail(job, option):
+    """Puts a script candidate's cover title and still on the job's thumbnail, keeping the title style."""
+    if option.thumbnail_text:
+        job.options.thumbnail.text = option.thumbnail_text
+    if option.thumbnail_source is not None:
+        job.options.thumbnail.source, job.options.thumbnail.time = option.thumbnail_source, option.thumbnail_time
 
 
 async def parallel(items, action, limit):
@@ -164,6 +176,8 @@ class Pipeline:
         assets.checkpoint(job)
         video = domains.load(job.domain).media == 'video'
         job.storyboard = await performance.wait('script.analyze', codex.analyze_video(job) if video else codex.analyze(job))
+        if video and job.storyboard.script_options:
+            use_option_thumbnail(job, job.storyboard.script_options[job.storyboard.script_choice])
         assets.restore(job)
         assets.invalidate(job)
         self.update(job, 'uploaded', '대본을 준비했습니다. 자막을 조절하고 크레딧 견적을 확인해 주세요.')
@@ -404,6 +418,90 @@ class Pipeline:
             await self.preview(job_id)
         else:
             await self.render(job_id)
+
+    async def batch_quote(self, job_id, workspace):
+        """Free Drama3 quote for every script candidate's voices; lines already voiced are not bought again."""
+        job = store.read(job_id)
+        options = job.storyboard.script_options if job.storyboard else []
+        if len(options) < 2:
+            raise ValueError('대본 후보가 2개 이상일 때 여러 편을 만들 수 있어요.')
+        previous = job.state if job.state not in {'error', 'interrupted'} else 'uploaded'
+        self.update(job, 'quoting', f'대본 후보 {len(options)}개의 Drama3 음성 견적을 확인하고 있습니다.')
+        folder = job_path(job.id)
+        voices = dict(job.batch.get('voices', {}))  # Voice asset key -> its Story Studio block record.
+        items, seen = [], set()
+        for option in options:
+            for text in option.texts:
+                key = assets.cache_key(job, assets.voice_key(job, Scene(photos=[0], text=text)))
+                cached = job.assets.get(key, {})
+                if key in seen or (cached.get('file') and (folder / cached['file']).is_file()):
+                    continue
+                seen.add(key)
+                record = voices.setdefault(key, {})
+                async def persist(data, record=record):
+                    record.update(data)
+                    job.batch['voices'] = voices
+                    store.save(job)
+                name = 'Stay Studio ' + job.id + ' ' + stable_hash(key)
+                quoted = await performance.wait('voice.quote', self.drama.quote(text, name, record, persist))
+                items.append({**quoted, 'key': key})
+        total = sum(item['credits'] for item in items)
+        balances = [item['balance'] for item in items if item.get('balance') is not None]
+        if balances and total > min(balances):
+            raise RuntimeError('영상 여러 편의 음성 견적이 남은 Fish 크레딧보다 큽니다.')
+        job.batch = {'id': uuid.uuid4().hex, 'total': total, 'items': items, 'voices': voices, 'workspace': workspace,
+                     'texts': [option.texts for option in options], 'state': 'awaiting_approval', 'results': []}
+        self.update(job, previous, f'영상 {len(options)}편 견적: {total:,} 크레딧. 승인하면 음성을 만들고 영상을 뽑습니다.')
+
+    @performance.operation
+    async def batch_generate(self, job_id, quote_id, expected_credits):
+        """Buys the quoted voices, then renders one final reel per script candidate with its own cover."""
+        job = store.read(job_id)
+        batch, options = job.batch, job.storyboard.script_options if job.storyboard else []
+        if batch.get('id') != quote_id or batch.get('total') != expected_credits:
+            raise ValueError('견적이 바뀌었습니다. 영상 여러 편 견적을 다시 확인해 주세요.')
+        if batch.get('texts') != [option.texts for option in options]:
+            raise ValueError('대본이 바뀌었습니다. 영상 여러 편 견적을 다시 확인해 주세요.')
+        previous = job.state if job.state not in {'error', 'interrupted'} else 'uploaded'
+        self.update(job, 'generating', f'승인한 크레딧으로 대본 {len(options)}개의 Drama3 음성을 만들고 있습니다.')
+        folder = job_path(job.id)
+
+        async def voice(item):
+            key, record = item['key'], batch['voices'][item['key']]
+            output = folder / f'voice-{stable_hash(key)}.mp3'
+            async def submitted(data):
+                record.update(data)
+                store.save(job)
+            if not output.is_file():
+                if record.get('state') == 'submitted':  # Paid before a restart: collect it, never buy it twice.
+                    await self.drama.recover(record, output, submitted)
+                else:
+                    await self.drama.generate(item['text'], item['credits'], output, submitted, item)
+            job.assets[key] = {**record, 'file': output.name, 'asset_key': key}
+            store.save(job)
+        await parallel(batch['items'], voice, 3)
+        results = []
+        for index, option in enumerate(options):
+            variant = job.model_copy(deep=True)
+            variant.storyboard.script_choice = index
+            for scene, text in zip(variant.storyboard.scenes, option.texts):
+                scene.text = text
+            variant.narration = {str(i): dict(job.assets[assets.cache_key(job, assets.voice_key(job, scene))])
+                                 for i, scene in enumerate(variant.storyboard.scenes)}
+            use_option_thumbnail(variant, option)
+            def progress(message, number=index + 1):
+                job.message = f'{number}/{len(options)}편 · {message}'
+                store.save(job)
+            self.update(job, 'rendering', f'{index + 1}/{len(options)}편을 1080p로 합성하고 있습니다.')
+            output = await asyncio.to_thread(render, variant, progress, True)
+            files = {}
+            for kind, name in BATCH_EXPORTS.items():
+                if output.get(kind):
+                    files[kind] = f'option-{index + 1}-{name}'
+                    shutil.copyfile(folder / output[kind], folder / files[kind])
+            results.append({'title': option.title, 'duration': output['duration'], 'warnings': output['warnings'], **files})
+        job.batch.update(state='complete', results=results)
+        self.update(job, previous, f'대본 후보 {len(results)}개로 영상 {len(results)}편을 만들었습니다. 아래에서 저장하세요.')
 
     @performance.operation
     async def preview(self, job_id):

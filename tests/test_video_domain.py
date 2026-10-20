@@ -367,6 +367,50 @@ class VideoRenderTests(unittest.TestCase):
                 self.assertAlmostEqual(render(job)['duration'], result['duration'] - 0.1, delta=0.01)
 
 
+class ScriptCoverTests(unittest.TestCase):
+    def test_each_candidate_gets_a_two_line_cover_from_a_frame_without_the_product(self):
+        sampled = [(0, 1.0, 1, 0.0, 2.0), (1, 5.5, 1, 4.0, 7.0)]
+        three_lines = chr(10).join(['남편이랑 싸운 이유', '이거 하나', '셋째 줄'])
+        options = [{'title': 'a', 'texts': ['가.'], 'thumbnail_text': three_lines, 'thumbnail_image': 2},
+                   {'title': 'b', 'texts': ['나.'], 'thumbnail_text': '삼십 년 살림 비법', 'thumbnail_image': 1}]
+        codex.pick_thumbnails(options, sampled, {1}, [{'source': 0, 'start': 0.4}])
+        self.assertEqual((options[0]['thumbnail_source'], options[0]['thumbnail_time']), (1, 5.5))
+        self.assertEqual(options[0]['thumbnail_text'].splitlines(), ['남편이랑 싸운 이유', '이거 하나'])  # Two lines at most.
+        self.assertEqual((options[1]['thumbnail_source'], options[1]['thumbnail_time']), (0, 0.4))  # Frame 1 shows the product.
+        self.assertEqual(options[1]['thumbnail_text'], '30년 살림 비법')
+
+
+class BatchReelTests(unittest.TestCase):
+    def test_one_final_reel_per_candidate_buys_shared_lines_once(self):
+        from studio.pipeline import Pipeline
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            job = video_job(folder, durations=(3.0, 3.0))
+            job.storyboard = Storyboard.validate_video_plan(
+                {'scenes': [{'photos': [0], 'text': '같은 첫 줄.'}, {'photos': [1], 'text': '첫째 끝!'}],
+                 'segments': [{'source': 0, 'start': 0.0, 'end': 1.5}, {'source': 1, 'start': 0.0, 'end': 1.5}],
+                 'script_options': [{'title': '하나', 'texts': ['같은 첫 줄.', '첫째 끝!'], 'thumbnail_text': '하나 표지', 'thumbnail_source': 0},
+                                    {'title': '둘', 'texts': ['같은 첫 줄.', '둘째 끝!'], 'thumbnail_text': '둘 표지', 'thumbnail_source': 1}]},
+                job.photos)
+            drama = AsyncMock()
+            drama.quote.side_effect = lambda text, name, record, saved: {'project_id': 'p', 'block': text, 'text': text, 'credits': 10, 'balance': 999}
+            async def generate(text, credits, output, saved, request):
+                with wave.open(str(output), 'wb') as audio:
+                    audio.setparams((1, 2, 48000, 0, 'NONE', 'not compressed'))
+                    audio.writeframes(tone(48000))
+            drama.generate.side_effect = generate
+            with patch('studio.pipeline.store.read', return_value=job), patch('studio.pipeline.store.save'),                  patch('studio.pipeline.job_path', return_value=folder), patch('studio.render.job_path', return_value=folder):
+                pipeline = Pipeline(AsyncMock(), drama)
+                asyncio.run(pipeline.batch_quote(job.id, 'w'))
+                self.assertEqual(job.batch['total'], 30)  # Three different lines; the shared first line is bought once.
+                asyncio.run(pipeline.batch_generate(job.id, job.batch['id'], 30))
+            results = job.batch['results']
+            self.assertEqual([r['title'] for r in results], ['하나', '둘'])
+            for result in results:
+                self.assertTrue((folder / result['file']).is_file())
+            self.assertEqual(drama.generate.call_count, 3)
+
+
 def result_timeline(folder):
     import json
     return json.loads((folder / 'verification.json').read_text(encoding='utf-8'))['timeline']

@@ -304,11 +304,13 @@ function optionEditor(option,index){
   const form=document.createElement('div');form.className='script-option editing';
   const title=document.createElement('strong');title.textContent=`${index+1}. ${option.title} · 고치는 중`;form.append(title);
   const fields=option.texts.map(text=>{const field=document.createElement('textarea');field.value=text;field.maxLength=160;field.rows=2;form.append(field);return field;});
+  const coverLabel=document.createElement('small');coverLabel.textContent='썸네일 제목 (두 줄)';const cover=document.createElement('textarea');cover.value=option.thumbnail_text||'';cover.maxLength=60;cover.rows=2;form.append(coverLabel,cover);
   const row=document.createElement('div');row.className='option-actions';
   const save=document.createElement('button');save.type='button';save.className='dark';save.textContent='저장';
   const cancel=document.createElement('button');cancel.type='button';cancel.className='outline';cancel.textContent='취소';
   save.onclick=action(async()=>{const texts=fields.map(field=>field.value.trim());if(texts.some(text=>!text))throw new Error('빈 문장이 있어요. 문장을 채워 주세요.');
-    option.texts=texts;const plan=job.storyboard;if(index===plan.script_choice){plan.scenes.forEach((scene,i)=>{scene.text=texts[i];});const scene=currentScene();if(scene)$('captionText').value=scene.text;}
+    option.texts=texts;option.thumbnail_text=cover.value.trim();const plan=job.storyboard;
+    if(index===plan.script_choice){plan.scenes.forEach((scene,i)=>{scene.text=texts[i];});const scene=currentScene();if(scene)$('captionText').value=scene.text;if(option.thumbnail_text){$('thumbText').value=option.thumbnail_text;dirtyStyle=true;}}
     editingOption=null;planChanged();drawScript();queuePreview();});
   cancel.onclick=()=>{editingOption=null;drawScript();};
   row.append(save,cancel);form.append(row);setTimeout(()=>fields[0]?.focus(),0);return form;
@@ -322,6 +324,7 @@ function drawScriptOptions(panel){
     if(editingOption===index){box.append(optionEditor(option,index));return;}
     const chosen=index===job.storyboard.script_choice,card=document.createElement('button');card.type='button';card.className='script-option';card.setAttribute('role','radio');card.setAttribute('aria-checked',String(chosen));card.disabled=planLocked();
     const title=document.createElement('strong');title.textContent=`${index+1}. ${option.title}`+(chosen?' · 사용 중':'');const text=document.createElement('p');text.textContent=option.texts.join(' ');card.append(title,text);
+    if(option.thumbnail_text){const cover=document.createElement('small');cover.className='option-cover';cover.textContent='썸네일: '+option.thumbnail_text.replace('\n',' / ');card.append(cover);}
     card.onclick=()=>chooseScript(index);card.title='누르면 이 대본을 쓰고, 더블클릭하면 바로 고칠 수 있어요';
     card.ondblclick=event=>{event.preventDefault();if(planLocked())return;editingOption=index;drawScript();};box.append(card);
   });panel.append(box);
@@ -331,6 +334,8 @@ function chooseScript(index){
   if(index===plan.script_choice||planLocked())return;
   if(current&&plan.scenes.some((scene,i)=>scene.text!==current.texts[i])&&!window.confirm('직접 고친 대본이 선택한 후보로 바뀌어요. 계속할까요?'))return;
   plan.script_choice=index;plan.scenes.forEach((scene,i)=>{scene.text=plan.script_options[index].texts[i];});
+  const cover=plan.script_options[index];if(cover.thumbnail_text){$('thumbText').value=cover.thumbnail_text;}
+  if(cover.thumbnail_source!==null&&cover.thumbnail_source!==undefined){thumbFrame={source:cover.thumbnail_source,time:cover.thumbnail_time||0};drawThumbFrame();}dirtyStyle=true;
   selectedCaptionCue=0;
   const scene=plan.scenes.find(s=>s.photos.includes(selectedPhoto));if(scene)$('captionText').value=scene.text;
   planChanged();drawScript();queuePreview();
@@ -395,7 +400,7 @@ function drawStatus(){
   $('status').className=job?.state==='error'?'error':busy?'busy':'';
   $('statusTitle').textContent=sourceBusy?'작업을 준비하고 있어요.':job?.message||'사진을 기다리고 있어요.';
   $('statusDetail').textContent=job?.error||(hasUnsavedEdits()?'변경 사항이 아직 저장되지 않았어요. 상단에서 한 번에 저장하세요.':`${words().noun} 선택 → 대본·자막 편집 → 견적·영상 생성 → 확인·저장`);drawPreviewStatus(busy);
-  $('quoteBox').hidden=job?.state!=='awaiting_approval'||!job?.quote||dirtyScript;
+  $('quoteBox').hidden=job?.state!=='awaiting_approval'||!job?.quote||dirtyScript;drawBatch();
   $('approve').disabled=busy||dirtyScript||!numericValid();
   if(job?.quote){$('credits').textContent=job.quote.total.toLocaleString()+' credits';$('quoteBreakdown').textContent=`움직임 ${job.quote.videos.length}장(${job.video_model} · ${job.video_parameters.resolution})`+(hasNarration()?` · Drama3 음성 ${job.quote.voices.length}장면`:' · 음성 없음');}drawModels();
   const audioReady=job?.storyboard&&(!hasNarration()||job.storyboard.scenes.every((s,i)=>job.narration[String(i)]?.file));
@@ -578,6 +583,21 @@ $('newJob').onclick=()=>{
 };
 $('prepare').onclick=action(async()=>{await planTransaction(async()=>{await persistEdits();await api(`/api/jobs/${job.id}/${combinedPreparation()?'prepare':'analyze'}`,options());job=await api('/api/jobs/'+job.id);});});
 $('quote').onclick=action(async()=>{const workspace=$('workspace').value;if(!planValid())throw new Error('움직임 프롬프트와 대본을 확인해 주세요.');if(!workspace){$('settingsButton').click();throw new Error('크레딧 견적을 확인하려면 계정을 연결하고 사용할 계정을 선택해 주세요.');}await planTransaction(async()=>{await persistEdits();await api(`/api/jobs/${job.id}/quote`,{workspace});job=await api('/api/jobs/'+job.id);drawScript();});});
+function drawBatch(){
+  const options=job?.storyboard?.script_options||[],show=Boolean(job&&videoDomain()&&options.length>1);$('batchPanel').hidden=!show;if(!show)return;
+  const batch=job.batch||{},busy=Boolean(sourceBusy||busyStates.has(job.state));
+  $('batchQuote').textContent=`대본 후보 ${options.length}개로 영상 ${options.length}편 만들기 · 견적 보기`;$('batchQuote').disabled=busy;
+  $('batchBox').hidden=batch.state!=='awaiting_approval';$('batchCount').textContent=String((batch.texts||[]).length);
+  $('batchCredits').textContent=(batch.total||0).toLocaleString()+' credits';$('batchApprove').disabled=busy;
+  const list=$('batchResults');list.replaceChildren();
+  for(const [index,result] of (batch.results||[]).entries()){const row=document.createElement('div');row.className='export-card';const info=document.createElement('div');
+    const title=document.createElement('strong');title.textContent=`${index+1}편 · ${result.title}`;const note=document.createElement('small');note.textContent=`${result.duration.toFixed(1)}초 · 완성본 MP4`;info.append(title,note);
+    const link=document.createElement('a');link.className='quiet';link.textContent='저장 ↓';link.href=`/api/jobs/${job.id}/files/${result.file}`;link.download=result.file;row.append(info,link);list.append(row);}
+}
+$('batchQuote').onclick=action(async()=>{const workspace=$('workspace').value;if(!workspace){$('settingsButton').click();throw new Error('크레딧 견적을 확인하려면 계정을 연결하고 사용할 계정을 선택해 주세요.');}
+  await planTransaction(async()=>{await persistEdits();await api(`/api/jobs/${job.id}/batch/quote`,{workspace});job=await api('/api/jobs/'+job.id);});});
+$('batchApprove').onclick=action(async()=>{const batch=job.batch;if(!batch?.id)throw new Error('영상 여러 편 견적을 먼저 확인해 주세요.');
+  await planTransaction(async()=>{await persistEdits();await api(`/api/jobs/${job.id}/batch/approve`,{quote_id:batch.id,expected_credits:batch.total});job=await api('/api/jobs/'+job.id);});});
 $('approve').onclick=action(async()=>{if(dirtyScript||!job.quote)throw new Error('대본·움직임이 바뀌었습니다. 견적을 다시 확인해 주세요.');const approval={quote_id:job.quote.id,expected_credits:job.quote.total};await planTransaction(async()=>{await persistEdits();previewMode='video';await api(`/api/jobs/${job.id}/approve`,approval);job=await api('/api/jobs/'+job.id);drawScript();});});
 $('rerender').onclick=action(async()=>{await planTransaction(async()=>{await persistEdits();previewMode='video';await api(`/api/jobs/${job.id}/render`,{});job=await api('/api/jobs/'+job.id);});});
 $('resume').onclick=action(async()=>{await planTransaction(async()=>{if(hasUnsavedEdits())await persistEdits();previewMode='video';await api(`/api/jobs/${job.id}/resume`,{});job=await api('/api/jobs/'+job.id);});});

@@ -770,6 +770,28 @@ async def quote(job_id: str, value: dict):
     return {'ok': True}
 
 
+@app.post('/api/jobs/{job_id}/batch/quote')
+async def batch_quote(job_id: str, value: dict):
+    """Video domains: free voice quote for one final reel per script candidate."""
+    workspace = value.get('workspace')
+    if not workspace or not any(item['workspace_id'] == workspace for item in connection['workspaces']):
+        raise ValueError('연결된 Fish 작업 공간을 선택해 주세요.')
+    job = store.read(job_id)
+    editable(job)
+    if domains.load(job.domain).media != 'video':
+        raise ValueError('영상 여러 편 만들기는 쇼핑 작업에서만 쓸 수 있어요.')
+    pipeline.launch(job_id, pipeline.batch_quote, workspace)
+    return {'ok': True}
+
+
+@app.post('/api/jobs/{job_id}/batch/approve')
+async def batch_approve(job_id: str, value: dict):
+    job = store.read(job_id)
+    editable(job)
+    pipeline.launch(job_id, pipeline.batch_generate, value.get('quote_id'), value.get('expected_credits'))
+    return {'ok': True}
+
+
 @app.post('/api/jobs/{job_id}/video-models')
 async def compare_video_models(job_id: str, value: dict):
     workspace = value.get('workspace')

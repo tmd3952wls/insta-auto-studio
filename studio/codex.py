@@ -32,10 +32,15 @@ class PickedSegment(Segment):
     image: int
 
 
+class PickedOption(ScriptOption):
+    """A script candidate as the model returns it: `thumbnail_image` is the attached frame for its cover."""
+    thumbnail_image: int
+
+
 class VideoPlan(BaseModel):
     """What Codex returns for a video domain: Storyboard fields plus a crop per source video."""
     scenes: list[Scene]
-    script_options: list[ScriptOption]
+    script_options: list[PickedOption]
     script_choice: int
     segments: list[PickedSegment]
     source_crops: list[SourceCrop]
@@ -160,6 +165,19 @@ def digits(text):
         tens, _, ones = match[1].partition('십')
         return f'{NUMBER_WORDS.get(tens, 1) * 10 + NUMBER_WORDS.get(ones, 0)}{match[2]}'
     return SINO_NUMBER.sub(number, text)
+
+
+def pick_thumbnails(options, sampled, product, segments):
+    """Turns each candidate's cover frame number into a source and second; a frame showing the product, or none,
+    falls back to the first cut's first frame."""
+    for option in options:
+        number = option.pop('thumbnail_image', 0)
+        if 0 < number <= len(sampled) and number not in product:
+            option['thumbnail_source'], option['thumbnail_time'] = sampled[number - 1][0], round(sampled[number - 1][1], 2)
+        elif segments:
+            option['thumbnail_source'], option['thumbnail_time'] = segments[0]['source'], segments[0]['start']
+        lines = [line.strip() for line in digits(option.get('thumbnail_text', '')).splitlines() if line.strip()]
+        option['thumbnail_text'] = '\n'.join(lines[:2])[:60]
 
 
 def repair_scenes(result):
@@ -312,6 +330,7 @@ scenes의 text에는 첫 번째 후보의 문장을 그대로 넣고 script_choi
 영상 전체는 약 {TARGET_SECONDS}초입니다. 내레이션 전체를 {TARGET_SECONDS}초 안팎(공백 포함 약 {TARGET_SECONDS * 7}자)에 맞추고, 구간 하나마다 자막 구 1~2개가 걸리게 쓰세요.
 text는 장면마다 공백 포함 150자 이내의 완성된 문장으로 쓰고 마침표나 물음표로 끝내세요. 화면 자막은 쉼표·마침표 단위로 한 구씩 표시되므로 구 사이를 쉼표로 나누세요. 마지막 장면의 마무리(저장·댓글 유도) 문장을 자르지 마세요.
 '''}source_crops는 위 소스마다 정확히 하나씩 쓰세요.
+script_options마다 썸네일도 쓰세요. thumbnail_text는 영상 맨 앞 커버에 크게 들어갈 제목 두 줄입니다(줄바꿈 \n으로 나누고 줄마다 공백 포함 10자 안팎). 그 후보의 훅처럼 궁금증을 만들고, 제품명·브랜드는 쓰지 않으며, 숫자는 아라비아 숫자로 씁니다. 예) "남편이랑 싸운 이유\n이거 하나 때문". thumbnail_image는 커버 사진으로 쓸 이미지 번호입니다. 제품 디자인·이름이 보이지 않고, 문제 상황이나 놀라운 결과가 한눈에 보이는 화면을 고르세요.
 product_frames에는 제품 용기·포장 디자인이나 제품명·상표 글자가 알아볼 수 있게 보이는 이미지 번호를 빠짐없이 쓰세요. 없으면 빈 배열입니다.
 구간마다 image에는 그 구간의 말(words)이 가리키는 모습이 실제로 보이는 이미지 번호를, words에는 그 구간이 나오는 동안 들리는 장면 문장의 한 부분을 쓰세요. 한 장면의 words를 순서대로 이어 붙이면 그 장면 문장이 되어야 합니다. 앱은 image가 속한 장면(괄호 안 시간) 안에서 구간을 잘라 씁니다.
 motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 빈 객체로 반환하세요.
@@ -325,7 +344,9 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
         starts = [sum(counts[:n]) for n in range(len(counts))]
         result['scenes'] = [{'id': '', 'photos': list(range(start, start + count)), 'text': text}
                             for start, (text, count) in zip(starts, own)]
-        result['script_options'] = [{'title': '내 대본', 'texts': [text for text, _ in own]}]
+        picked = (result.get('script_options') or [{}])[0]  # Keep the cover the model chose for the user's script.
+        result['script_options'] = [{'title': '내 대본', 'texts': [text for text, _ in own],
+                                     'thumbnail_text': picked.get('thumbnail_text', ''), 'thumbnail_image': picked.get('thumbnail_image', 0)}]
         result['script_choice'] = 0
     else:
         repair_scenes(result)
@@ -333,7 +354,8 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
             option['texts'] = [digits(text) for text in option.get('texts', [])]
         take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
-    flagged = [sampled[number - 1][:3] for number in result.pop('product_frames', []) if 0 < number <= len(sampled)]
+    product = set(result.pop('product_frames', []))
+    flagged = [sampled[number - 1][:3] for number in product if 0 < number <= len(sampled)]
     place_segments(result.get('segments', []), sampled, lengths)
     for segment in result.get('segments', []):  # Keep the model's picks inside the real clip length.
         length = lengths.get(segment.get('source'))
@@ -343,6 +365,7 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
             if segment['end'] - segment['start'] > MAX_SEGMENT:
                 segment['end'] = round(segment['start'] + MAX_SEGMENT, 2)
     avoid_product(result.get('segments', []), flagged, lengths)  # The product must stay a mystery.
+    pick_thumbnails(result.get('script_options', []), sampled, product, result.get('segments', []))
     result.update(motion=[], crop_focus=[], motion_recommendations=[], selection_reasons={})
     plan = Storyboard.validate_video_plan(result, job.photos)
     plan.provenance = domains.record(domain, [domains.schema_block(domain), skill_text(job.domain, 'SKILL_TEXT.md'),

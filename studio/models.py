@@ -178,6 +178,9 @@ class ScriptOption(BaseModel):
     """One full narration candidate: a text per scene, sharing the storyboard's scene grouping."""
     title: str = Field(min_length=1, max_length=40)
     texts: list[str] = Field(min_length=1)
+    thumbnail_text: str = Field('', max_length=60)  # Video domains: the two-line cover title for this candidate.
+    thumbnail_source: int | None = Field(None, ge=0)  # The source video and second its cover still comes from.
+    thumbnail_time: float = Field(0, ge=0)
 
 
 class Storyboard(BaseModel):
@@ -333,6 +336,7 @@ class Job(BaseModel):
     video_parameters: dict = Field(default_factory=lambda: dict(MOTION_PARAMETERS))
     model_probe: dict | None = None  # Uploaded sample image reused for free per-model estimates.
     domain: str = 'stay'  # Fixed at creation (validated by app.new_job); picks the schema, prompts and UI wording.
+    batch: dict = Field(default_factory=dict)  # Shopping: one final reel per script candidate (quote, voices, results).
     facts: dict[str, str] = Field(default_factory=dict)  # User-entered schema properties, e.g. product name.
 
     def video_choice(self):
