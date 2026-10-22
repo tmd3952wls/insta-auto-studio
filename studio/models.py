@@ -90,7 +90,7 @@ class TitleStyle(CaptionStyle):
     """The thumbnail title's own look: larger and brighter than the running captions."""
     font_size: int = Field(110, ge=20, le=220)
     y: float = Field(18, ge=-35, le=35)
-    color: str = Field('#FFE500', pattern=r'^#[0-9a-fA-F]{6}$')
+    color: str = Field('#FFFFFF', pattern=r'^#[0-9a-fA-F]{6}$')
     outline: int = Field(10, ge=0, le=24)
     background_opacity: float = Field(0, ge=0, le=1)
     shadow: int = Field(0, ge=0, le=12)

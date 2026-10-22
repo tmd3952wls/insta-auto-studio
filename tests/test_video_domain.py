@@ -391,6 +391,11 @@ class ScriptCoverTests(unittest.TestCase):
         self.assertEqual(options[1]['thumbnail_text'], '30년 살림 비법')
         self.assertEqual((options[2]['thumbnail_source'], options[2]['thumbnail_time']), (0, 0.4))  # No such frame.
 
+    def test_cover_title_is_white_with_a_black_outline_like_the_users_covers(self):
+        from studio.models import TitleStyle
+        style = TitleStyle()
+        self.assertEqual((style.color, style.outline > 0), ('#FFFFFF', True))
+
     def test_shopping_reads_its_cover_rules_from_the_users_channel(self):
         rules = codex.skill_text('shopping', 'SKILL_THUMBNAIL.md')
         self.assertIn('다이소 가시면 / 이건 꼭 사오세요', rules)
