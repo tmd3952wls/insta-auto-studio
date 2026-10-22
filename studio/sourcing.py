@@ -167,6 +167,8 @@ def read_lines(search):
             search['step_text'], search['notice'] = text, ''
         elif line.startswith('NOTICE: '):
             search['notice'] = line[8:]
+        elif line.startswith('SOURCE_SHEET: '):
+            search['sheet'] = line[14:].strip()
         elif line.startswith('PRODUCT: '):
             search['product'] = line[9:]
         elif line.startswith('KEYWORDS: '):

@@ -3,6 +3,8 @@ import json
 import sys
 import tempfile
 import unittest
+
+from PIL import Image
 from pathlib import Path
 from unittest.mock import patch
 
@@ -54,6 +56,7 @@ class ShopSearchTests(unittest.TestCase):
         return self.client.get('/api/shop-searches', params={'job_id': sourcing.read(search_id)['job_id']}).json()[0]
 
     def test_found_videos_become_the_new_shopping_jobs_uploaded_videos(self):
+        Image.new('RGB', (64, 64), 'white').save(self.clips[0].parent / 'sheet.jpg')  # The original reel's frames.
         self.fake(*map(str, self.clips))
         value = self.start()
         self.assertEqual(value['job']['domain'], 'shopping')
@@ -67,6 +70,8 @@ class ShopSearchTests(unittest.TestCase):
         self.assertEqual(job.photos[0]['found']['how'], 'vmake 자막 삭제')
         self.assertEqual(job.photo_order, [0, 1])
         self.assertIn('2개', job.message)
+        self.assertEqual(job.facts['reference'], '지문 인식 USB 메모리')  # Scripts follow the original reel's product.
+        self.assertTrue((self.folder / 'jobs' / job.id / 'reference-sheet.jpg').is_file())
 
     def test_videos_already_in_the_job_are_not_added_twice(self):
         response = self.client.post('/api/jobs', headers=self.headers, data={'domain': 'shopping'},

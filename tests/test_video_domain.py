@@ -295,6 +295,29 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(low, 0.85)
         self.assertAlmostEqual(high, 1.95)
 
+    def test_the_original_reel_sets_the_product_and_keeps_other_products_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            job = video_job(folder, facts={'reference': '벽 틈을 막는 찰흙'})
+            Image.new('RGB', (64, 64), 'white').save(folder / codex.REFERENCE_SHEET)
+            seen = {}
+            async def fake(where, prompt, images, schema, name):
+                seen.update(prompt=prompt, images=list(images))
+                answer = video_answer()
+                answer['other_product_frames'] = [1]  # Image 1 shows a sink pipe instead of a wall gap.
+                answer['segments'][0].update(image=1, words='가.')
+                for option in answer['script_options']:
+                    option['thumbnail_image'] = 1
+                return answer
+            with patch('studio.codex.run_structured', fake), patch('studio.codex.job_path', return_value=folder):
+                plan = asyncio.run(codex.analyze_video(job))
+        self.assertIn('## 원본 영상 (가장 중요)', seen['prompt'])
+        self.assertIn('"벽 틈을 막는 찰흙"', seen['prompt'])
+        self.assertEqual(seen['images'][-1].name, codex.REFERENCE_SHEET)  # Attached last: source numbering is unchanged.
+        self.assertNotIn('벽 틈을 막는 찰흙"}', seen['prompt'])  # Not repeated among the plain product facts.
+        self.assertNotEqual(plan.segments[0].source, 0)  # Source 0 is all sink pipe: its cut moves to another clip.
+        self.assertTrue(all(option.thumbnail_time != 1.5 or option.thumbnail_source != 0 for option in plan.script_options))
+
     def test_video_plan_rejects_segments_outside_their_source(self):
         sources = [{'kind': 'video', 'duration': 3.0}]
         value = {'scenes': [{'photos': [0], 'text': '가.'}], 'segments': [{'source': 0, 'start': 1, 'end': 4}]}

@@ -26,6 +26,9 @@ def main():
         time.sleep(args.delay)
 
     say('STEP: 1/6 원본 영상 받는 중')
+    sheet = Path(args.files[0]).parent / 'sheet.jpg' if args.files else None
+    if sheet and sheet.is_file():
+        say(f'SOURCE_SHEET: {sheet}')
     say('STEP: 2/6 Claude가 제품을 확인하고 중국어 검색어를 정하는 중')
     say('PRODUCT: 지문 인식 USB 메모리')
     say('KEYWORDS: 指纹U盘 / 指纹加密U盘')

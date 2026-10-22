@@ -15,6 +15,11 @@
           "source": "user"
         },
         {
+          "name": "reference",
+          "label": "원본 영상 제품 (인스타 링크로 찾으면 자동으로 채워져요)",
+          "source": "user"
+        },
+        {
           "name": "memo",
           "label": "핵심 특징·혜택",
           "source": "user"

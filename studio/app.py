@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import secrets
+import shutil
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -373,6 +374,11 @@ async def deliver_search(search):
         for source in job.sources:
             if source.get('url') == search['url']:
                 source['name'] = result['product'][:80]
+    if result.get('product') and not job.facts.get('reference'):  # What the original reel sells: scripts follow it.
+        job.facts['reference'] = result['product'][:300]
+    sheet = Path(search.get('sheet') or '')
+    if sheet.name and sheet.is_file():
+        shutil.copyfile(sheet, job_path(job.id) / codex.REFERENCE_SHEET)
     job.message = f'인스타 링크로 찾은 영상 {added}개를 넣었어요.' + (f' {len(skipped)}개는 넣지 못했어요.' if skipped else '')
     store.save(job)
     if not added:
