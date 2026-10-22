@@ -378,16 +378,23 @@ class VideoRenderTests(unittest.TestCase):
 
 
 class ScriptCoverTests(unittest.TestCase):
-    def test_each_candidate_gets_a_two_line_cover_from_a_frame_without_the_product(self):
+    def test_each_candidate_gets_a_two_line_cover_from_its_chosen_frame(self):
         sampled = [(0, 1.0, 1, 0.0, 2.0), (1, 5.5, 1, 4.0, 7.0)]
         three_lines = chr(10).join(['남편이랑 싸운 이유', '이거 하나', '셋째 줄'])
         options = [{'title': 'a', 'texts': ['가.'], 'thumbnail_text': three_lines, 'thumbnail_image': 2},
-                   {'title': 'b', 'texts': ['나.'], 'thumbnail_text': '삼십 년 살림 비법', 'thumbnail_image': 1}]
-        codex.pick_thumbnails(options, sampled, {1}, [{'source': 0, 'start': 0.4}])
+                   {'title': 'b', 'texts': ['나.'], 'thumbnail_text': '삼십 년 살림 비법', 'thumbnail_image': 1},
+                   {'title': 'c', 'texts': ['다.'], 'thumbnail_text': '다이소에서\n인기투표 1위?', 'thumbnail_image': 9}]
+        codex.pick_thumbnails(options, sampled, [{'source': 0, 'start': 0.4}])
         self.assertEqual((options[0]['thumbnail_source'], options[0]['thumbnail_time']), (1, 5.5))
         self.assertEqual(options[0]['thumbnail_text'].splitlines(), ['남편이랑 싸운 이유', '이거 하나'])  # Two lines at most.
-        self.assertEqual((options[1]['thumbnail_source'], options[1]['thumbnail_time']), (0, 0.4))  # Frame 1 shows the product.
+        self.assertEqual((options[1]['thumbnail_source'], options[1]['thumbnail_time']), (0, 1.0))  # Products may show.
         self.assertEqual(options[1]['thumbnail_text'], '30년 살림 비법')
+        self.assertEqual((options[2]['thumbnail_source'], options[2]['thumbnail_time']), (0, 0.4))  # No such frame.
+
+    def test_shopping_reads_its_cover_rules_from_the_users_channel(self):
+        rules = codex.skill_text('shopping', 'SKILL_THUMBNAIL.md')
+        self.assertIn('다이소 가시면 / 이건 꼭 사오세요', rules)
+        self.assertIn('상품명·상표·중국어 글자가 읽히는 장면은 피한다', rules)
 
 
 class BatchReelTests(unittest.TestCase):
