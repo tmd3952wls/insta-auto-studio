@@ -206,6 +206,21 @@ def pick_thumbnails(options, sampled, segments, other=()):
         option['thumbnail_text'] = '\n'.join(lines[:2])[:60]
 
 
+def fill_segments(segments, needed, sampled, avoid):
+    """Adds the cuts the model left out (it returned none when the product was in every shot) so each scene still
+    gets one: frames it did not flag and shots not yet used come first, taking the clips in turn."""
+    if len(segments) >= needed or not sampled:
+        return
+    used = {(sampled[s['image'] - 1][0], sampled[s['image'] - 1][3]) for s in segments if 0 < s.get('image', 0) <= len(sampled)}
+    rank, seen = {}, {}
+    for number, item in enumerate(sampled, 1):  # Order within its clip, so the clips take turns.
+        rank[number] = seen[item[0]] = seen.get(item[0], -1) + 1
+    order = sorted(rank, key=lambda n: (n in avoid, (sampled[n - 1][0], sampled[n - 1][3]) in used, rank[n], sampled[n - 1][0]))
+    while len(segments) < needed:
+        number = order[(len(segments)) % len(order)]
+        segments.append({'source': sampled[number - 1][0], 'start': 0.0, 'end': MIN_CUT + 0.2, 'image': number, 'words': ''})
+
+
 def repair_scenes(result):
     """Keeps the model's grouping of segments into scenes but makes it use every segment once, in order: it
     sometimes counts segments from 1 like the attached images, which leaves the first out."""
@@ -408,8 +423,9 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
     if own:
         # The words are the user's: keep them exactly and only take the model's segments, grouped by the table.
         counts = [count for _, count in own]
-        if len(result.get('segments', [])) != sum(counts):
-            raise ValueError('AI가 장면별 구간 수를 맞추지 못했습니다. 다시 분석해 주세요.')
+        segments = result.setdefault('segments', [])
+        del segments[sum(counts):]  # Extra cuts are dropped; missing ones are filled from unused shots.
+        fill_segments(segments, sum(counts), sampled, set(result.get('product_frames', [])) | set(result.get('other_product_frames', [])))
         starts = [sum(counts[:n]) for n in range(len(counts))]
         result['scenes'] = [{'id': '', 'photos': list(range(start, start + count)), 'text': text}
                             for start, (text, count) in zip(starts, own)]
@@ -418,13 +434,20 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
                                      'thumbnail_text': picked.get('thumbnail_text', ''), 'thumbnail_image': picked.get('thumbnail_image', 0)}]
         result['script_choice'] = 0
     else:
+        fill_segments(result.setdefault('segments', []), len(result.get('scenes', [])), sampled,
+                      set(result.get('product_frames', [])) | set(result.get('other_product_frames', [])))
         repair_scenes(result)
         for option in result.get('script_options') or []:  # Counts as numerals, however the model wrote them.
             option['texts'] = [digits(text) for text in option.get('texts', [])]
         take_script_options(result)
     crops = {item.get('source'): item for item in result.pop('source_crops', [])}
     other = set(result.pop('other_product_frames', []))  # A different product or use than the original reel.
-    product = set(result.pop('product_frames', [])) | other
+    product = set(result.pop('product_frames', []))
+    if len(product) > 0.6 * len(sampled):
+        # The product is in nearly every frame (a dispenser, a tool in hand): hiding it is impossible, and keeping the
+        # flags would crowd every cut into the few frames left.
+        product = set()
+    product |= other
     flagged = [sampled[number - 1][:3] for number in product if 0 < number <= len(sampled)]
     place_segments(result.get('segments', []), sampled, lengths, taken_shots(sampled, avoid))
     for segment in result.get('segments', []):  # Keep the model's picks inside the real clip length.

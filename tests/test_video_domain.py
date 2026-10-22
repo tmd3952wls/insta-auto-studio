@@ -343,6 +343,20 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertNotEqual([(s.source, s.start) for s in second.segments], [(s.source, s.start) for s in plan.segments])
         self.assertEqual(len(second.texts), len(second.scenes))
 
+    def test_an_edit_still_gets_cuts_when_the_model_returns_none(self):
+        # A dispenser is in every frame: the model flagged them all and picked no cuts at all.
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            job = video_job(folder)
+            async def fake(where, prompt, images, schema, name):
+                answer = video_answer()
+                answer['segments'], answer['product_frames'] = [], [1, 2, 3, 4, 5]
+                return answer
+            with patch('studio.codex.run_structured', fake), patch('studio.codex.job_path', return_value=folder):
+                plan = asyncio.run(codex.analyze_video(job))
+        self.assertEqual(len(plan.segments), len(plan.scenes))  # One cut per scene at least.
+        self.assertEqual(len({s.source for s in plan.segments}), 2)  # Clips take turns.
+
     def test_video_plan_rejects_segments_outside_their_source(self):
         sources = [{'kind': 'video', 'duration': 3.0}]
         value = {'scenes': [{'photos': [0], 'text': '가.'}], 'segments': [{'source': 0, 'start': 1, 'end': 4}]}
