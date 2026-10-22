@@ -484,6 +484,9 @@ class Pipeline:
         for index, option in enumerate(options):
             variant = job.model_copy(deep=True)
             variant.storyboard.script_choice = index
+            if option.scenes:  # This version's own cuts.
+                variant.storyboard.scenes = [scene.model_copy() for scene in option.scenes]
+                variant.storyboard.segments = [segment.model_copy() for segment in option.segments]
             for scene, text in zip(variant.storyboard.scenes, option.texts):
                 scene.text = text
             variant.narration = {str(i): dict(job.assets[assets.cache_key(job, assets.voice_key(job, scene))])

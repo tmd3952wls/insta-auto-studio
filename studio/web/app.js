@@ -310,6 +310,7 @@ function optionEditor(option,index){
   const cancel=document.createElement('button');cancel.type='button';cancel.className='outline';cancel.textContent='취소';
   save.onclick=action(async()=>{const texts=fields.map(field=>field.value.trim());if(texts.some(text=>!text))throw new Error('빈 문장이 있어요. 문장을 채워 주세요.');
     option.texts=texts;option.thumbnail_text=cover.value.trim();const plan=job.storyboard;
+    if(option.scenes?.length)option.scenes.forEach((scene,i)=>{scene.text=texts[i];});
     if(index===plan.script_choice){plan.scenes.forEach((scene,i)=>{scene.text=texts[i];});const scene=currentScene();if(scene)$('captionText').value=scene.text;if(option.thumbnail_text){$('thumbText').value=option.thumbnail_text;dirtyStyle=true;}}
     editingOption=null;planChanged();drawScript();queuePreview();});
   cancel.onclick=()=>{editingOption=null;drawScript();};
@@ -329,11 +330,18 @@ function drawScriptOptions(panel){
     card.ondblclick=event=>{event.preventDefault();if(planLocked())return;editingOption=index;drawScript();};box.append(card);
   });panel.append(box);
 }
+function keepChosenOption(){  // Edits to the scenes belong to the candidate in use when it has its own cuts.
+  const plan=job?.storyboard,option=plan?.script_options?.[plan.script_choice];
+  if(option?.scenes?.length){option.scenes=structuredClone(plan.scenes);option.segments=structuredClone(plan.segments);option.texts=plan.scenes.map(s=>s.text);}
+}
 function chooseScript(index){
   const plan=job.storyboard,current=plan.script_options[plan.script_choice];
   if(index===plan.script_choice||planLocked())return;
-  if(current&&plan.scenes.some((scene,i)=>scene.text!==current.texts[i])&&!window.confirm('직접 고친 대본이 선택한 후보로 바뀌어요. 계속할까요?'))return;
-  plan.script_choice=index;plan.scenes.forEach((scene,i)=>{scene.text=plan.script_options[index].texts[i];});
+  if(current?.scenes?.length)keepChosenOption();
+  else if(current&&plan.scenes.some((scene,i)=>scene.text!==current.texts[i])&&!window.confirm('직접 고친 대본이 선택한 후보로 바뀌어요. 계속할까요?'))return;
+  plan.script_choice=index;const next=plan.script_options[index];
+  if(next.scenes?.length){plan.scenes=structuredClone(next.scenes);plan.segments=structuredClone(next.segments);selectedSegment=0;}
+  plan.scenes.forEach((scene,i)=>{scene.text=next.texts[i];});
   const cover=plan.script_options[index];if(cover.thumbnail_text){$('thumbText').value=cover.thumbnail_text;}
   if(cover.thumbnail_source!==null&&cover.thumbnail_source!==undefined){thumbFrame={source:cover.thumbnail_source,time:cover.thumbnail_time||0};drawThumbFrame();}dirtyStyle=true;
   selectedCaptionCue=0;
@@ -370,7 +378,7 @@ async function savePlan(){
   caption();await planTransaction(persistEdits);
   $('statusTitle').textContent='변경 사항을 저장했어요.';
 }
-async function persistPlan(){job={...await api(`/api/jobs/${job.id}/storyboard`,job.storyboard),preview_stale:true,media_ready:false};dirtyScript=false;drawScript();}
+async function persistPlan(){keepChosenOption();job={...await api(`/api/jobs/${job.id}/storyboard`,job.storyboard),preview_stale:true,media_ready:false};dirtyScript=false;drawScript();}
 async function persistEdits(){
   const settings=options();
   if(dirtyFacts){job=await api(`/api/jobs/${job.id}/facts`,factsValue());dirtyFacts=false;}

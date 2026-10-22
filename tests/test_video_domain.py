@@ -174,7 +174,8 @@ class VideoAnalysisTests(unittest.TestCase):
             job = video_job(folder, facts={'name': '얼룩 제거 스프레이'})
             seen = {}
             async def fake(where, prompt, images, schema, name):
-                seen.update(prompt=prompt, images=images, schema=schema)
+                if not seen:  # The first call writes the candidates; later ones cut the other versions.
+                    seen.update(prompt=prompt, images=images, schema=schema)
                 return video_answer()
             with patch('studio.codex.run_structured', fake), patch('studio.codex.job_path', return_value=folder):
                 plan = asyncio.run(codex.analyze_video(job))
@@ -317,6 +318,30 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertNotIn('벽 틈을 막는 찰흙"}', seen['prompt'])  # Not repeated among the plain product facts.
         self.assertNotEqual(plan.segments[0].source, 0)  # Source 0 is all sink pipe: its cut moves to another clip.
         self.assertTrue(all(option.thumbnail_time != 1.5 or option.thumbnail_source != 0 for option in plan.script_options))
+
+    def test_each_candidate_is_cut_to_its_own_words_with_fresh_shots(self):
+        import re
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            job = video_job(folder, durations=(6.0, 7.0, 8.0))
+            prompts = []
+            async def fake(where, prompt, images, schema, name):
+                prompts.append(prompt)
+                counts = [int(n) for n in re.findall(r'장면 \d+ \(구간 (\d)개\)', prompt)]
+                answer = video_answer()
+                if counts:  # A later version: cut its own script, one segment per table row.
+                    answer['segments'] = [{'source': 2, 'start': 0.5, 'end': 1.7, 'image': 4, 'words': '말'}
+                                          for _ in range(sum(counts))]
+                return answer
+            with patch('studio.codex.run_structured', fake), patch('studio.codex.job_path', return_value=folder):
+                plan = asyncio.run(codex.analyze_video(job))
+        self.assertEqual(len(prompts), 3)  # The candidates, then a cut for each of the other two versions.
+        self.assertIn('앞 버전에서 이미 쓴 장면의 이미지', prompts[2])
+        first, second, third = plan.script_options
+        self.assertEqual([s.model_dump() for s in first.segments], [s.model_dump() for s in plan.segments])
+        self.assertTrue(second.segments and third.segments)
+        self.assertNotEqual([(s.source, s.start) for s in second.segments], [(s.source, s.start) for s in plan.segments])
+        self.assertEqual(len(second.texts), len(second.scenes))
 
     def test_video_plan_rejects_segments_outside_their_source(self):
         sources = [{'kind': 'video', 'duration': 3.0}]

@@ -274,11 +274,26 @@ def spoken_seconds(words):
     return max(MIN_CUT, sum(char.isalnum() for char in words) / SYLLABLES_PER_SECOND)
 
 
-def place_segments(segments, sampled, lengths):
+def taken_shots(sampled, spans):
+    """(source, shot start) of the shots that `spans` (source, start, end) — cuts of another version — sit in."""
+    return {(source, low) for source, _, _, low, high in sampled
+            if any(other == source and low <= (start + end) / 2 < high for other, start, end in spans)}
+
+
+def taken_hint(sampled, spans):
+    taken = taken_shots(sampled, spans)
+    numbers = [n + 1 for n, item in enumerate(sampled) if (item[0], item[3]) in taken]
+    if not numbers:
+        return ''
+    return (f'이 대본은 같은 상품의 다른 버전 영상입니다. 앞 버전에서 이미 쓴 장면의 이미지: {numbers}. '
+            '말에 맞는 다른 장면이 있으면 이 이미지들 대신 다른 장면을 골라, 앞 버전과 컷이 겹치지 않게 하세요.\n')
+
+
+def place_segments(segments, sampled, lengths, taken=()):
     """Moves each segment onto the shot of the frame the model said shows its words, centred on that frame.
     No shot is used twice, and a shot too short for its words gives way to the nearest long-enough unused shot of
     the same clip: stretching a short shot makes it stutter, repeating one makes the reel feel looped."""
-    used = set()
+    used = set(taken)  # Shots other versions already show count as used, so this version picks fresh ones.
     for segment in segments:
         number = segment.pop('image', 0)
         if not 0 < number <= len(sampled):
@@ -300,7 +315,31 @@ def place_segments(segments, sampled, lengths):
 
 
 async def analyze_video(job):
-    """Video domains: script candidates, subtitle-hiding crops and script-matched segments from source frames."""
+    """Video domains: script candidates, then cuts for each candidate's own words, so the finished versions differ in
+    picture as well as in voice. Later versions are steered away from shots the earlier ones already used."""
+    plan = await plan_video(job)
+    if job.facts.get('script', '').strip() or len(plan.script_options) < 2:
+        return plan
+    first = plan.script_options[plan.script_choice]
+    first.scenes, first.segments = [scene.model_copy() for scene in plan.scenes], [s.model_copy() for s in plan.segments]
+    used = [(s.source, s.start, s.end) for s in plan.segments]
+    for option in plan.script_options:
+        if option is first:
+            continue
+        variant = job.model_copy(deep=True)  # Its own script, cut like a user-written one; crops are already set.
+        variant.facts['script'] = '\n'.join(option.texts)
+        try:
+            own = await plan_video(variant, avoid=used)
+        except ValueError:
+            continue  # The model could not cut this version: it keeps sharing the first version's cuts.
+        option.texts = own.script_options[0].texts
+        option.scenes, option.segments = own.scenes, own.segments
+        used += [(s.source, s.start, s.end) for s in own.segments]
+    return plan
+
+
+async def plan_video(job, avoid=()):
+    """One analysis: script candidates (or the user's own script), subtitle-hiding crops and script-matched segments."""
     from .render import shot_cuts, video_frame
     folder = job_path(job.id)
     domain = domains.load(job.domain)
@@ -364,7 +403,7 @@ product_frames에는 제품 용기·포장 디자인이나 제품명·상표 글
 other_product_frames에는 원본 영상(또는 상품 정보)과 다른 제품이거나 다른 곳에 쓰는 장면의 이미지 번호를 쓰세요. 없으면 빈 배열입니다.
 구간마다 image에는 그 구간의 말(words)이 가리키는 모습이 실제로 보이는 이미지 번호를, words에는 그 구간이 나오는 동안 들리는 장면 문장의 한 부분을 쓰세요. 한 장면의 words를 순서대로 이어 붙이면 그 장면 문장이 되어야 합니다. 앱은 image가 속한 장면(괄호 안 시간) 안에서 구간을 잘라 씁니다.
 motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 빈 객체로 반환하세요.
-{facts_block(job)}도구 사용·파일 수정 없이 지정 JSON 스키마 결과만 반환하세요.'''
+{taken_hint(sampled, avoid)}{facts_block(job)}도구 사용·파일 수정 없이 지정 JSON 스키마 결과만 반환하세요.'''
     result = await run_structured(folder, prompt, images, VideoPlan.model_json_schema(), 'analysis')
     if own:
         # The words are the user's: keep them exactly and only take the model's segments, grouped by the table.
@@ -387,7 +426,7 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
     other = set(result.pop('other_product_frames', []))  # A different product or use than the original reel.
     product = set(result.pop('product_frames', [])) | other
     flagged = [sampled[number - 1][:3] for number in product if 0 < number <= len(sampled)]
-    place_segments(result.get('segments', []), sampled, lengths)
+    place_segments(result.get('segments', []), sampled, lengths, taken_shots(sampled, avoid))
     for segment in result.get('segments', []):  # Keep the model's picks inside the real clip length.
         length = lengths.get(segment.get('source'))
         if length:

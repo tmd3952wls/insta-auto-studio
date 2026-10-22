@@ -175,12 +175,15 @@ class CropBox(BaseModel):
 
 
 class ScriptOption(BaseModel):
-    """One full narration candidate: a text per scene, sharing the storyboard's scene grouping."""
+    """One full narration candidate: a text per scene. Video domains give each candidate its own scenes and cuts
+    (`scenes`, `segments`) so every version is edited to its own words; without them it shares the storyboard's."""
     title: str = Field(min_length=1, max_length=40)
     texts: list[str] = Field(min_length=1)
     thumbnail_text: str = Field('', max_length=60)  # Video domains: the two-line cover title for this candidate.
     thumbnail_source: int | None = Field(None, ge=0)  # The source video and second its cover still comes from.
     thumbnail_time: float = Field(0, ge=0)
+    scenes: list[Scene] = Field(default_factory=list)
+    segments: list[Segment] = Field(default_factory=list)
 
 
 class Storyboard(BaseModel):
@@ -248,7 +251,7 @@ class Storyboard(BaseModel):
             raise ValueError('직접 구성의 사진 순서를 유지해야 합니다.')
         if len({scene.id for scene in plan.scenes}) != len(plan.scenes):
             raise ValueError('장면 ID가 중복되었습니다.')
-        if any(len(option.texts) != len(plan.scenes) or not all(0 < len(text.strip()) <= 160 for text in option.texts)
+        if any(len(option.texts) != len(option.scenes or plan.scenes) or not all(0 < len(text.strip()) <= 160 for text in option.texts)
                for option in plan.script_options):
             raise ValueError('대본 후보의 장면 수가 맞지 않거나 빈 문장이 있습니다.')
         if plan.script_choice >= max(1, len(plan.script_options)):
@@ -275,7 +278,10 @@ class Storyboard(BaseModel):
         if not plan.segments:
             raise ValueError('영상 구간이 없습니다.')
         plan = cls.validate_plan(value, len(plan.segments), 0, list(range(len(plan.segments))))
-        for segment in plan.segments:
+        for option in plan.script_options:  # A candidate's own cuts follow the same rules as the main ones.
+            if option.scenes and [i for scene in option.scenes for i in scene.photos] != list(range(len(option.segments))):
+                raise ValueError('대본 후보의 장면과 영상 구간이 맞지 않습니다.')
+        for segment in plan.segments + [s for option in plan.script_options for s in option.segments]:
             if segment.source >= len(sources) or sources[segment.source].get('kind') != 'video':
                 raise ValueError('영상 구간의 소스 번호가 올바르지 않습니다.')
             if segment.end > sources[segment.source]['duration'] + 0.05:
