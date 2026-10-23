@@ -357,6 +357,17 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertEqual(len(plan.segments), len(plan.scenes))  # One cut per scene at least.
         self.assertEqual(len({s.source for s in plan.segments}), 2)  # Clips take turns.
 
+    def test_cuts_piled_onto_one_shot_are_spread_over_unused_shots(self):
+        sampled = [(0, 1.0, 1, 0.0, 2.0), (0, 3.0, 1, 2.0, 4.0), (1, 1.0, 1, 0.0, 2.0), (1, 3.0, 1, 2.0, 4.0)]
+        segments = [{'source': 0, 'start': 0.4, 'end': 1.6} for _ in range(4)]  # Four cuts, one shot.
+        codex.spread_segments(segments, sampled)
+        self.assertEqual(len({(s['source'], s['start'] >= 2.0) for s in segments}), 4)  # Four different shots.
+        self.assertEqual(sorted(s['source'] for s in segments), [0, 0, 1, 1])  # Neither clip gives more than half.
+        # Shots another version already shows are left for last.
+        again = [{'source': 0, 'start': 0.4, 'end': 1.6}]
+        codex.spread_segments(again, sampled, taken={(0, 0.0)})
+        self.assertNotEqual((again[0]['source'], again[0]['start'] >= 2.0), (0, False))
+
     def test_video_plan_rejects_segments_outside_their_source(self):
         sources = [{'kind': 'video', 'duration': 3.0}]
         value = {'scenes': [{'photos': [0], 'text': '가.'}], 'segments': [{'source': 0, 'start': 1, 'end': 4}]}

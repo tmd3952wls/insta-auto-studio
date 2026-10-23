@@ -221,6 +221,45 @@ def fill_segments(segments, needed, sampled, avoid):
         segments.append({'source': sampled[number - 1][0], 'start': 0.0, 'end': MIN_CUT + 0.2, 'image': number, 'words': ''})
 
 
+def spread_segments(segments, sampled, taken=(), avoid=()):
+    """Last pass over a version's cuts: no shot twice, and none another version already shows, while unused shots
+    remain. A repeated cut moves to the nearest unused shot of its clip, else to the clip used least so far; flagged
+    frames (`avoid`) are taken last. Earlier passes can pile cuts onto the few shots left, which loops the reel."""
+    shots, seen = [], set()
+    for number, (source, seconds, _, low, high) in enumerate(sampled, 1):
+        if (source, low) not in seen:
+            seen.add((source, low))
+            shots.append((source, low, high, seconds, number))
+    if not shots:
+        return
+    uses = {(source, low): 0 for source, low, *_ in shots}
+    for key in taken:
+        if key in uses:
+            uses[key] += 1
+    per_clip = {}
+    cap = max(2, -(-len(segments) // 2))  # No clip supplies more than half of a version's cuts.
+    def shot_of(segment):
+        middle = (segment['start'] + segment['end']) / 2
+        return next(((source, low) for source, low, high, *_ in shots
+                     if source == segment['source'] and low <= middle < high), None)
+    for segment in segments:
+        key = shot_of(segment)
+        if key is not None and uses[key] == 0 and per_clip.get(key[0], 0) < cap:
+            uses[key] = 1
+            per_clip[key[0]] = per_clip.get(key[0], 0) + 1
+            continue
+        length = segment['end'] - segment['start']
+        middle = (segment['start'] + segment['end']) / 2
+        source, low, high, seconds, _ = min(shots, key=lambda shot: (
+            uses[(shot[0], shot[1])], per_clip.get(shot[0], 0) >= cap, shot[4] in avoid, shot[0] != segment['source'],
+            per_clip.get(shot[0], 0), abs(shot[3] - middle) if shot[0] == segment['source'] else shot[3]))
+        length = min(length, high - low) if high - low >= MIN_SEGMENT else length
+        start = min(max(seconds - length / 2, low), max(low, high - length))
+        segment.update(source=source, start=round(start, 2), end=round(start + length, 2))
+        uses[(source, low)] += 1
+        per_clip[source] = per_clip.get(source, 0) + 1
+
+
 def repair_scenes(result):
     """Keeps the model's grouping of segments into scenes but makes it use every segment once, in order: it
     sometimes counts segments from 1 like the attached images, which leaves the first out."""
@@ -458,6 +497,7 @@ motion, crop_focus, motion_recommendations는 빈 배열, selection_reasons는 �
             if segment['end'] - segment['start'] > MAX_SEGMENT:
                 segment['end'] = round(segment['start'] + MAX_SEGMENT, 2)
     avoid_product(result.get('segments', []), flagged, lengths)  # The product must stay a mystery.
+    spread_segments(result.get('segments', []), sampled, taken_shots(sampled, avoid), product)
     pick_thumbnails(result.get('script_options', []), sampled, result.get('segments', []), other)
     result.update(motion=[], crop_focus=[], motion_recommendations=[], selection_reasons={})
     plan = Storyboard.validate_video_plan(result, job.photos)
