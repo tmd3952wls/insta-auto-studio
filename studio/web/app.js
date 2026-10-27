@@ -300,21 +300,43 @@ function drawScript(){
   });drawMotion();
 }
 let editingOption=null;  // Script candidate being edited in place (double-click a card).
+// A pasted whole script is shared out over the candidate's scenes: one line per scene when the counts match,
+// otherwise its lines (then sentences, then words) are grouped into that many scenes of even length.
+function scriptParts(text,count){
+  let units=text.split(/\n+/).map(line=>line.trim()).filter(Boolean);
+  if(units.length<count)units=units.flatMap(line=>line.split(/(?<=[.?!])\s+/)).map(part=>part.trim()).filter(Boolean);
+  while(units.length&&units.length<count){const longest=units.reduce((best,unit,i)=>unit.length>units[best].length?i:best,0),words=units[longest].split(' ');
+    if(words.length<2)break;const middle=Math.ceil(words.length/2);units.splice(longest,1,words.slice(0,middle).join(' '),words.slice(middle).join(' '));}
+  if(units.length<count)return null;
+  const total=units.reduce((sum,unit)=>sum+unit.length,0),parts=[];let start=0,done=0;
+  for(let part=0;part<count;part++){
+    const left=count-part,target=done+(total-done)/left;let end=start+1,size=units[start].length;
+    while(units.length-end>left-1&&Math.abs(size+units[end].length-(target-done))<=Math.abs(size-(target-done))){size+=units[end].length;end++;}
+    if(part===count-1)end=units.length;
+    parts.push(units.slice(start,end).join(' '));done+=units.slice(start,end).reduce((sum,unit)=>sum+unit.length,0);start=end;}
+  return parts;
+}
 function optionEditor(option,index){
   const form=document.createElement('div');form.className='script-option editing';
   const title=document.createElement('strong');title.textContent=`${index+1}. ${option.title} · 고치는 중`;form.append(title);
-  const fields=option.texts.map(text=>{const field=document.createElement('textarea');field.value=text;field.maxLength=160;field.rows=2;form.append(field);return field;});
+  const hint=document.createElement('small');hint.textContent=`대본 전체를 통째로 붙여넣어도 돼요. 한 줄이 한 장면이 되고, 줄 수가 다르면 장면 ${option.texts.length}개에 길이를 맞춰 나눠요.`;
+  const field=document.createElement('textarea');field.className='whole-script';field.value=option.texts.join('\n');field.rows=Math.max(8,option.texts.length+2);form.append(hint,field);
   const coverLabel=document.createElement('small');coverLabel.textContent='썸네일 제목 (두 줄)';const cover=document.createElement('textarea');cover.value=option.thumbnail_text||'';cover.maxLength=60;cover.rows=2;form.append(coverLabel,cover);
   const row=document.createElement('div');row.className='option-actions';
   const save=document.createElement('button');save.type='button';save.className='dark';save.textContent='저장';
   const cancel=document.createElement('button');cancel.type='button';cancel.className='outline';cancel.textContent='취소';
-  save.onclick=action(async()=>{const texts=fields.map(field=>field.value.trim());if(texts.some(text=>!text))throw new Error('빈 문장이 있어요. 문장을 채워 주세요.');
+  save.onclick=action(async()=>{const texts=scriptParts(field.value,option.texts.length);
+    if(!texts)throw new Error(`대본이 너무 짧아요. 장면 ${option.texts.length}개에 나눌 만큼 써 주세요.`);
+    if(texts.some(text=>text.length>160))throw new Error('한 장면이 160자를 넘어요. 줄을 나눠서 붙여넣어 주세요.');
+    const changed=texts.map((text,i)=>text!==option.texts[i]);
     option.texts=texts;option.thumbnail_text=cover.value.trim();const plan=job.storyboard;
-    if(option.scenes?.length)option.scenes.forEach((scene,i)=>{scene.text=texts[i];});
-    if(index===plan.script_choice){plan.scenes.forEach((scene,i)=>{scene.text=texts[i];});const scene=currentScene();if(scene)$('captionText').value=scene.text;if(option.thumbnail_text){$('thumbText').value=option.thumbnail_text;dirtyStyle=true;}}
+    // Changed lines no longer match their cuts' words; without words a scene's cuts share its time evenly.
+    const clear=(scenes,segments)=>scenes.forEach((scene,i)=>{if(changed[i])scene.photos.forEach(n=>{if(segments[n])segments[n].words='';});});
+    if(option.scenes?.length){option.scenes.forEach((scene,i)=>{scene.text=texts[i];});clear(option.scenes,option.segments||[]);}
+    if(index===plan.script_choice){plan.scenes.forEach((scene,i)=>{scene.text=texts[i];});clear(plan.scenes,plan.segments||[]);const scene=currentScene();if(scene)$('captionText').value=scene.text;if(option.thumbnail_text){$('thumbText').value=option.thumbnail_text;dirtyStyle=true;}}
     editingOption=null;planChanged();drawScript();queuePreview();});
   cancel.onclick=()=>{editingOption=null;drawScript();};
-  row.append(save,cancel);form.append(row);setTimeout(()=>fields[0]?.focus(),0);return form;
+  row.append(save,cancel);form.append(row);setTimeout(()=>field.focus(),0);return form;
 }
 function drawScriptOptions(panel){
   const options=job.storyboard.script_options||[];if(options.length<2)return;
