@@ -17,7 +17,7 @@ from studio import codex, domains, enhance, recommendation, store
 from studio.models import Job, Storyboard, plan_clips
 
 SHOPPING_EXAMPLES = ('저 이것 때문에 남편이랑 끝날 뻔했어요', '여러분 다이소 가시면 이건 꼭 사오세요',
-                     '여러분 저 드디어 찾았어요', '궁금하시면 나도 남겨주세요')
+                     '다이소 가면 이거 무조건 사오세요.', '궁금하시면 나도 남겨주세요')
 
 
 def plan_answer(count=10):
