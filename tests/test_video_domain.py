@@ -292,9 +292,12 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(low, 10.22)
         self.assertAlmostEqual(high, 11.32)
         self.assertEqual(fit_segment(2.0, 3.0, 1.0, [], 8.0), (2.0, 3.0))
-        low, high = fit_segment(1.0, 2.0, 1.5, [0.8, 2.0], 5.0)  # The shot is too short: use it whole.
-        self.assertAlmostEqual(low, 0.85)
-        self.assertAlmostEqual(high, 1.95)
+        # A 1.2 s shot for a 1.5 s slot: still natural speed, the rest borrowed from a neighbour as a real cut.
+        low, high = fit_segment(1.0, 2.0, 1.5, [0.8, 2.0], 5.0)
+        self.assertAlmostEqual(high - low, 1.5)
+        pieces = [p for p in (0.8 - low, 2.0 - max(low, 0.8), high - 2.0) if p > 0]
+        self.assertTrue(all(piece >= 0.45 or piece == high - low for piece in pieces if piece < high - low))
+        self.assertEqual(fit_segment(0.0, 1.0, 3.0, [], 2.0), (0.0, 2.0))  # Only a whole clip shorter than the slot.
 
     def test_the_original_reel_sets_the_product_and_keeps_other_products_out(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -182,16 +182,32 @@ def shot_cuts(path):
     return cuts
 
 
+MIN_PIECE = 0.45  # Seconds of a neighbouring shot long enough to read as a cut of its own, not a flash.
+SPEEDUP = 1.2  # Fastest a video-domain cut may play; slowing down is never used, it looks unnatural.
+
+
 def fit_segment(start, end, needed, cuts, duration, guard=0.05):
-    """A `needed`-second window from the chosen span that stays inside one shot of the source, so a cut never
-    flashes past for a few frames. A shot shorter than `needed` is used whole (the caller slows it down)."""
-    edges = [0.0, *[cut for cut in cuts if 0 < cut < duration], duration]
+    """A `needed`-second window, played at natural speed, from the shot of the source the chosen span sits in, so a
+    cut never flashes past for a few frames. A shot shorter than `needed` borrows the rest from its neighbours, each
+    borrowed piece at least MIN_PIECE long; only a whole clip shorter than `needed` comes back shorter."""
+    inner = [cut for cut in cuts if 0 < cut < duration]
+    edges = [0.0, *inner, duration]
     shots = list(zip(edges, edges[1:]))
     low, high = max(shots, key=lambda shot: min(end, shot[1]) - max(start, shot[0]))
     low, high = (low + guard if low > 0 else low), (high - guard if high < duration else high)
-    if high - low <= needed:
-        return low, high
-    begin = min(max(start, low), high - needed)
+    if high - low >= needed:
+        begin = min(max(start, low), high - needed)
+        return begin, begin + needed
+    if duration <= needed:
+        return 0.0, duration
+    centred = min(max(low - (needed - (high - low)) / 2, 0.0), duration - needed)
+    middle = (low + high) / 2
+    def score(begin):
+        marks = [begin, *[cut for cut in inner if begin < cut < begin + needed], begin + needed]
+        flashes = sum(b - a < MIN_PIECE for a, b in zip(marks, marks[1:]))
+        return flashes, not begin <= middle <= begin + needed, abs(begin - centred)
+    steps = [min(n * 0.05, duration - needed) for n in range(int((duration - needed) / 0.05) + 2)]
+    begin = min(steps, key=score)
     return begin, begin + needed
 
 
@@ -421,6 +437,8 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
                 # Stretch or trim the photo's shot to its slot (at most 2x slow motion, then hold the last frame),
                 # upscale 720p-class clips to 1080×1920 and split long shots into punch-in cuts.
                 speed = min(max(count / 30 / max(end - start, 0.1), 0.5), 2.0)
+                if photo_index in durations:  # Video domains: natural speed or a little faster, never slow motion.
+                    speed = min(max(speed, 1 / SPEEDUP), 1.0)
                 punch = (f"zoompan=z='{cut_zoom(count, longest=longest) if narrated else '1.0'}':"
                          "x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1920:fps=30,setsar=1")
                 base = (f'trim=start={start:.3f}:end={end:.3f},setpts=(PTS-STARTPTS)*{speed:.4f},'
@@ -428,9 +446,6 @@ def render(job, progress=lambda message: None, preview=False, folder=None, worke
                         f'tpad=stop_mode=clone:stop_duration={count/30+1},' + punch)
                 if job.domain == 'stay':
                     base = motion_filter(start, end, count, source_rates[source], fill.get(photo_index))
-                elif photo_index in durations and speed > 1.08:
-                    # A shot shorter than its slot: interpolate new frames instead of repeating them, which stutters.
-                    base = motion_filter(start, end, count, video_frame_rate(source), fill.get(photo_index)) + ',' + punch
             else:
                 source = export / f'photo-{photo_index:03}.jpg'
                 crop_photo(folder / job.photos[photo_index]['file'], *focus.get(photo_index, (0.5, 0.5))).save(source, quality=96)
