@@ -96,9 +96,10 @@ async def lifespan(app):
     store.recover()
     collector.recover()
     spawn(restore_fish())
-    spawn(sourcing.worker(deliver_search))
+    # A service that never finishes: kept out of `background`, which a code reload waits to drain.
+    searcher = asyncio.create_task(sourcing.worker(deliver_search))
     yield
-    tasks = list(background) + list(pipeline.tasks.values())
+    tasks = list(background) + list(pipeline.tasks.values()) + [searcher]
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
