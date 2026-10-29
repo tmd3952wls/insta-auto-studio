@@ -363,7 +363,7 @@ class VideoAnalysisTests(unittest.TestCase):
     def test_original_script_steers_candidate_one(self):
         job = Job(id='a' * 32, domain='shopping', facts={'original_script': '여러분 이거 무조건 써보세요\n댓글에 쪼물 남겨주세요'})
         block = codex.original_script_block(job)
-        self.assertIn('원본 따라하기', block)
+        self.assertIn('원본 비슷하게', block)
         self.assertIn('쪼물', block)
         self.assertNotIn('쪼물', codex.facts_block(job))  # Quoted once, as the model to follow, not as a product fact.
         self.assertEqual(codex.original_script_block(Job(id='b' * 32, domain='shopping')), '')
