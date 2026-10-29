@@ -22,6 +22,7 @@ MIN_SEGMENT, MAX_SEGMENT = 0.5, 8.0  # Seconds of source video one shot may use.
 MIN_CUT, MAX_CUT = 1.0, 2.0  # Seconds one cut of a video-domain reel stays on screen.
 SYLLABLES_PER_SECOND = 7.5  # Drama3 reading speed measured on the 2026-10-13 shopping reel.
 SCRIPT_CHARS = 600  # Longest user-written script.
+ORIGINAL_CHARS = 1000  # What an original reel says, transcribed; a 60 s reel stays under this.
 
 
 def script_scenes(text: str) -> list[tuple[str, int]]:

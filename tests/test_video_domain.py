@@ -360,6 +360,26 @@ class VideoAnalysisTests(unittest.TestCase):
         self.assertEqual(len(plan.segments), len(plan.scenes))  # One cut per scene at least.
         self.assertEqual(len({s.source for s in plan.segments}), 2)  # Clips take turns.
 
+    def test_original_script_steers_candidate_one(self):
+        job = Job(id='a' * 32, domain='shopping', facts={'original_script': '여러분 이거 무조건 써보세요\n댓글에 쪼물 남겨주세요'})
+        block = codex.original_script_block(job)
+        self.assertIn('원본 따라하기', block)
+        self.assertIn('쪼물', block)
+        self.assertNotIn('쪼물', codex.facts_block(job))  # Quoted once, as the model to follow, not as a product fact.
+        self.assertEqual(codex.original_script_block(Job(id='b' * 32, domain='shopping')), '')
+
+    def test_original_reel_is_found_next_to_its_frame_sheet(self):
+        from studio import transcribe
+        with tempfile.TemporaryDirectory() as folder:
+            frames = Path(folder) / '20261022_025255_Deu5Rc6yWBq_frames'
+            frames.mkdir()
+            (frames / 'sheet.jpg').write_bytes(b'x')
+            self.assertIsNone(transcribe.original_video(frames / 'sheet.jpg'))
+            video = Path(folder) / '20261022_025255_Deu5Rc6yWBq.mp4'
+            video.write_bytes(b'x')
+            self.assertEqual(transcribe.original_video(frames / 'sheet.jpg'), video)
+            self.assertIsNone(transcribe.original_video(Path(folder) / 'sheet.jpg'))
+
     def test_cuts_piled_onto_one_shot_are_spread_over_unused_shots(self):
         sampled = [(0, 1.0, 1, 0.0, 2.0), (0, 3.0, 1, 2.0, 4.0), (1, 1.0, 1, 0.0, 2.0), (1, 3.0, 1, 2.0, 4.0)]
         segments = [{'source': 0, 'start': 0.4, 'end': 1.6} for _ in range(4)]  # Four cuts, one shot.

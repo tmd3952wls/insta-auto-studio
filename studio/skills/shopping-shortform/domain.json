@@ -25,6 +25,11 @@
           "source": "user"
         },
         {
+          "name": "original_script",
+          "label": "원본 영상 대본 (인스타 링크로 찾으면 자동으로 받아 적어요 · 직접 붙여넣어도 돼요 · 대본 후보 1번이 이걸 거의 그대로 따라가요)",
+          "source": "user"
+        },
+        {
           "name": "script",
           "label": "내 대본 (선택 · 적으면 AI 대본 대신 이 대본으로 편집)",
           "source": "user"

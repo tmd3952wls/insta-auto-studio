@@ -17,11 +17,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from . import assets, codex, collector, composition, domains, enhance, performance, recommendation, sourcing, store, video_models
+from . import assets, codex, collector, composition, domains, enhance, performance, recommendation, sourcing, store, transcribe, video_models
 from .drama import Drama
 from .fish import Fish
 from .media import badge_image, caption_image, caption_segments, crop_photo, crop_video_frame, preview_image
-from .models import SCRIPT_CHARS, ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, Thumbnail, CreateOptions, CropBox, CropFocus, Job, Storyboard
+from .models import ORIGINAL_CHARS, SCRIPT_CHARS, ApproveRequest, BadgeStyle, CaptionPresetRequest, CaptionStyle, Thumbnail, CreateOptions, CropBox, CropFocus, Job, Storyboard
 from .paths import DATA, RESOURCES, initialize, job_path
 from .pipeline import Pipeline
 
@@ -370,17 +370,30 @@ async def deliver_search(search):
             skipped.append(f'{path.name}: 이미 넣은 영상이에요')
         store.save(job)
     search['added'], search['skipped'] = added, skipped
+    sheet = Path(search.get('sheet') or '')
+    spoken, unheard = '', ''
+    if added and sheet.name and not store.read(search['job_id']).facts.get('original_script'):
+        # What the original reel says: script candidate 1 follows it almost word for word.
+        video = transcribe.original_video(sheet)
+        if video:
+            search.update(step_text='원본 영상의 말을 받아 적는 중')
+            sourcing.save(search)
+            try:
+                spoken = await asyncio.to_thread(transcribe.transcribe, video)
+            except Exception as error:  # The videos are already in; only the original script is missing.
+                unheard = f' 원본 영상의 말은 받아 적지 못했어요({error}). 원본 대본 칸에 직접 붙여넣어 주세요.'
     job = store.read(search['job_id'])
+    if spoken and not job.facts.get('original_script'):
+        job.facts['original_script'] = spoken[:ORIGINAL_CHARS]
     if result.get('product'):
         for source in job.sources:
             if source.get('url') == search['url']:
                 source['name'] = result['product'][:80]
     if result.get('product') and not job.facts.get('reference'):  # What the original reel sells: scripts follow it.
         job.facts['reference'] = result['product'][:300]
-    sheet = Path(search.get('sheet') or '')
     if sheet.name and sheet.is_file():
         shutil.copyfile(sheet, job_path(job.id) / codex.REFERENCE_SHEET)
-    job.message = f'인스타 링크로 찾은 영상 {added}개를 넣었어요.' + (f' {len(skipped)}개는 넣지 못했어요.' if skipped else '')
+    job.message = f'인스타 링크로 찾은 영상 {added}개를 넣었어요.' + (f' {len(skipped)}개는 넣지 못했어요.' if skipped else '') + unheard
     store.save(job)
     if not added:
         raise ValueError('찾은 영상을 하나도 넣지 못했어요. ' + ' / '.join(skipped[:3]))
@@ -444,9 +457,9 @@ async def save_facts(job_id: str, value: dict):
     allowed = {prop.name for _, prop in domains.load(job.domain).facts()}
     if not isinstance(value, dict) or set(value) - allowed:
         raise ValueError('이 작업에 저장할 수 없는 정보가 있습니다.')
-    if any(not isinstance(text, str) or len(text.strip()) > (SCRIPT_CHARS if key == 'script' else 300)
-           for key, text in value.items()):
-        raise ValueError(f'입력한 정보는 항목마다 300자, 내 대본은 {SCRIPT_CHARS}자 이내로 적어 주세요.')
+    limits = {'script': SCRIPT_CHARS, 'original_script': ORIGINAL_CHARS}
+    if any(not isinstance(text, str) or len(text.strip()) > limits.get(key, 300) for key, text in value.items()):
+        raise ValueError(f'입력한 정보는 항목마다 300자, 내 대본은 {SCRIPT_CHARS}자, 원본 대본은 {ORIGINAL_CHARS}자 이내로 적어 주세요.')
     job.facts = {key: text.strip() for key, text in value.items() if text.strip()}
     store.save(job)
     return job.model_dump()

@@ -91,7 +91,7 @@ function drawDomain(){
   $('captionText').defaultValue=ui.caption_default||'';if(!job?.storyboard)$('captionText').value=$('captionText').defaultValue;
   if(compositionMode()==='ai')$('compositionHelp').textContent=ui.ai_help||'';
   const fields=$('factsFields');fields.replaceChildren();$('factsPanel').hidden=!job||!info.facts.length;
-  for(const fact of info.facts){const label=document.createElement('label');label.className='field';label.textContent=fact.label;const script=fact.key==='script',input=document.createElement(fact.key==='memo'||script?'textarea':'input');input.dataset.fact=fact.key;input.maxLength=script?600:300;if(script){input.rows=8;input.placeholder='한 줄에 한 문장씩 붙여넣으세요. 비워 두면 AI가 대본 3개를 써 줘요.';}input.value=job?.facts?.[fact.key]||'';input.oninput=()=>{dirtyFacts=true;drawStatus();};label.append(input);fields.append(label);}
+  for(const fact of info.facts){const label=document.createElement('label');label.className='field';label.textContent=fact.label;const script=fact.key==='script',original=fact.key==='original_script',input=document.createElement(fact.key==='memo'||script||original?'textarea':'input');input.dataset.fact=fact.key;input.maxLength=script?600:original?1000:300;if(script){input.rows=8;input.placeholder='한 줄에 한 문장씩 붙여넣으세요. 비워 두면 AI가 대본 3개를 써 줘요.';}if(original){input.rows=6;input.placeholder='원본 릴스에서 하는 말. 비워 두면 후보 1번도 AI가 새로 써요.';}input.value=job?.facts?.[fact.key]||'';input.oninput=()=>{dirtyFacts=true;drawStatus();};label.append(input);fields.append(label);}
   if(!job)drawPhotos();  // Empty grid header follows the chosen kind (사진 0장 / 소스 영상 0개).
 }
 function factsValue(){const value={};for(const input of document.querySelectorAll('#factsFields [data-fact]'))value[input.dataset.fact]=input.value;return value;}
